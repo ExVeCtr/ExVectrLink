@@ -1,5 +1,5 @@
-#ifndef ExVectrLink_SerialTelecoms_HPP
-#define ExVectrLink_SerialTelecoms_HPP
+#ifndef EXVECTRLINK_SERIALTELECOMS_HPP
+#define EXVECTRLINK_SERIALTELECOMS_HPP
 
 #include <cstdint>
 #include <functional>
@@ -7,6 +7,7 @@
 #include "ExVectrHAL/digital_io.hpp"
 
 #include "ExVectrCore/list_array.hpp"
+#include "ExVectrCore/task_types.hpp"
 
 namespace VCTR::SerialTelecoms {
 
@@ -26,22 +27,6 @@ enum SerialPacketType : uint8_t {
   Error,
 };
 
-struct SerialPacketCommand {
-  // Command type.
-  SerialPacketType packetType;
-  // Radio if applicable.
-  uint8_t radioNum;
-  // Packet data. Max 255 bytes.
-  Core::ListArray<uint8_t> packetData;
-};
-
-struct SerialPacketHandler {
-  // Command type to call handler on.
-  SerialPacketType packetType;
-  std::function<void(uint8_t radioNum, const Core::ListArray<uint8_t> &data)>
-      processFunction;
-};
-
 class ExVectrLinkSerialTelecoms : public Core::Task_Periodic {
 private:
   enum class SerialReadState {
@@ -54,6 +39,22 @@ private:
     WaitingForEndByte
   };
 
+  struct SerialPacketCommand {
+    // Command type.
+    SerialPacketType packetType;
+    // Radio if applicable.
+    uint8_t radioNum;
+    // Packet data. Max 255 bytes.
+    Core::ListArray<uint8_t> packetData;
+  };
+
+  struct SerialPacketHandler {
+    // Command type to call handler on.
+    SerialPacketType packetType;
+    std::function<void(uint8_t radioNum, const Core::ListArray<uint8_t> &data)>
+        processFunction;
+  };
+
 public:
   ExVectrLinkSerialTelecoms(HAL::DigitalIO &serialPort);
 
@@ -61,8 +62,13 @@ public:
   void taskCheck() override;
   void taskThread() override;
 
-  void addSerialPacketHandler(const SerialPacketHandler &handler);
-  void sendSerialPacket(const SerialPacketCommand &command);
+  void addSerialPacketHandler(
+      const SerialPacketType &type,
+      std::function<void(uint8_t radioNum,
+                         const Core::ListArray<uint8_t> &data)>
+          handler);
+  void sendSerialPacket(const SerialPacketType &type, uint8_t radioNum,
+                        const Core::ListArray<uint8_t> &data);
 
 private:
   void decodeSerialByte(uint8_t incomingByte);

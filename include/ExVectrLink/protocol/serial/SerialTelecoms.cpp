@@ -29,15 +29,15 @@ void ExVectrLinkSerialTelecoms::taskInit() {
   recievePacketData.clear();
 
   addSerialPacketHandler(
-      {SerialPacketType::SetBaudRate,
-       [this](uint8_t radioNum, const Core::ListArray<uint8_t> &data) {
-         if (data.size() == 4) {
-           uint32_t baudRate =
-               (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
-           serialPort.setInputParam(HAL::IO_PARAM_t::SPEED, baudRate);
-           serialPort.setOutputParam(HAL::IO_PARAM_t::SPEED, baudRate);
-         }
-       }});
+      SerialPacketType::SetBaudRate,
+      [this](uint8_t radioNum, const Core::ListArray<uint8_t> &data) {
+        if (data.size() == 4) {
+          uint32_t baudRate =
+              (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+          serialPort.setInputParam(HAL::IO_PARAM_t::SPEED, baudRate);
+          serialPort.setOutputParam(HAL::IO_PARAM_t::SPEED, baudRate);
+        }
+      });
 }
 
 void ExVectrLinkSerialTelecoms::taskCheck() {
@@ -81,18 +81,21 @@ void ExVectrLinkSerialTelecoms::taskThread() {
 }
 
 void ExVectrLinkSerialTelecoms::addSerialPacketHandler(
-    const SerialPacketHandler &handler) {
-  serialPacketHandlers.append(handler);
+    const SerialPacketType &type,
+    std::function<void(uint8_t radioNum, const Core::ListArray<uint8_t> &data)>
+        handler) {
+  serialPacketHandlers.append({type, handler});
 }
 
 void ExVectrLinkSerialTelecoms::sendSerialPacket(
-    const SerialPacketCommand &command) {
+    const SerialPacketType &type, uint8_t radioNum,
+    const Core::ListArray<uint8_t> &data) {
 
-  if (command.packetData.size() > 255) {
+  if (data.size() > 255) {
     LOG_MSG("Packet data was over 255 bytes. Not sending packet. \n");
     return;
   }
-  if (sendDataBuffer.size() + command.packetData.size() + 5 > 1024) {
+  if (sendDataBuffer.size() + data.size() + 5 > 1024) {
     LOG_MSG(
         "Send buffer overflow. Not sending packet. Consider increasing buffer "
         "size or sending less data.\n");
@@ -102,11 +105,11 @@ void ExVectrLinkSerialTelecoms::sendSerialPacket(
   sendDataBuffer.placeBack(static_cast<uint8_t>(SerialByteType::StartByteA));
   sendDataBuffer.placeBack(
       static_cast<uint8_t>(SerialByteType::StartByteB + ExVectrLinkVersion));
-  sendDataBuffer.placeBack(static_cast<uint8_t>(command.packetType));
-  sendDataBuffer.placeBack(command.radioNum);
-  sendDataBuffer.placeBack(command.packetData.size());
-  for (size_t i = 0; i < command.packetData.size(); i++) {
-    sendDataBuffer.placeBack(command.packetData[i]);
+  sendDataBuffer.placeBack(static_cast<uint8_t>(type));
+  sendDataBuffer.placeBack(radioNum);
+  sendDataBuffer.placeBack(data.size());
+  for (size_t i = 0; i < data.size(); i++) {
+    sendDataBuffer.placeBack(data[i]);
   }
   sendDataBuffer.placeBack(static_cast<uint8_t>(SerialByteType::EndByte));
 }
