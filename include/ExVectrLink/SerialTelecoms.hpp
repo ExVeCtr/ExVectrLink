@@ -68,7 +68,7 @@ public:
                          const Core::ListArray<uint8_t> &data)>
           handler);
   void sendSerialPacket(const SerialPacketType &type, uint8_t radioNum,
-                        const Core::ListArray<uint8_t> &data);
+                        const Core::ListArray<uint8_t> &data = {});
 
 private:
   void decodeSerialByte(uint8_t incomingByte);

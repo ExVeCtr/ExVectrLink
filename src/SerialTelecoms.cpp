@@ -6,7 +6,7 @@
 #include "ExVectrCore/task_types.hpp"
 #include "ExVectrCore/time_definitions.hpp"
 
-#include "SerialTelecoms.hpp"
+#include "ExVectrLink/SerialTelecoms.hpp"
 
 #include "ExVectrCore/list_array.hpp"
 
