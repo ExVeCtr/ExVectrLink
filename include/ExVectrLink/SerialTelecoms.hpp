@@ -70,6 +70,8 @@ public:
   void sendSerialPacket(const SerialPacketType &type, uint8_t radioNum,
                         const Core::ListArray<uint8_t> &data = {});
 
+  bool isConnected() const;
+
 private:
   void decodeSerialByte(uint8_t incomingByte);
 
@@ -85,9 +87,15 @@ private:
   Core::ListBuffer<uint8_t, 1024> sendDataBuffer;
 
   int64_t lastSerialByteTime = 0;
+  int64_t lastValidPacketTime = 0;
+  int64_t lastPacketSendTime = 0;
   int64_t lastLoopTime = 0;
 
   Core::ListArray<SerialPacketHandler> serialPacketHandlers;
+
+  bool standardBaudRate = true;
+
+  bool isSerialConnected = false;
 };
 
 } // namespace VCTR::SerialTelecoms

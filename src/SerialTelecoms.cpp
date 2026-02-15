@@ -2,13 +2,12 @@
 
 #include "ExVectrHAL/digital_io.hpp"
 
+#include "ExVectrCore/list_array.hpp"
 #include "ExVectrCore/print.hpp"
 #include "ExVectrCore/task_types.hpp"
 #include "ExVectrCore/time_definitions.hpp"
 
 #include "ExVectrLink/SerialTelecoms.hpp"
-
-#include "ExVectrCore/list_array.hpp"
 
 namespace VCTR::SerialTelecoms {
 
@@ -36,6 +35,7 @@ void ExVectrLinkSerialTelecoms::taskInit() {
               (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
           serialPort.setInputParam(HAL::IO_PARAM_t::SPEED, baudRate);
           serialPort.setOutputParam(HAL::IO_PARAM_t::SPEED, baudRate);
+          standardBaudRate = (baudRate == 115200);
         }
       });
 }
@@ -64,17 +64,27 @@ void ExVectrLinkSerialTelecoms::taskThread() {
     serialPort.writeByte(byteToSend);
   }
 
-  if (lastSerialByteTime != lastLoopTime &&
+  if (lastSerialByteTime != lastLoopTime && !standardBaudRate &&
       loopStart - lastSerialByteTime > 1000 * Core::MILLISECONDS) {
-    // If it's been more than 1s. We should reset everything.
-    // We also check last loop time to avoid scheduling hicks causing this to
-    // trigger.
     LOG_MSG("Serial communication timeout. Resetting serial state and baud "
             "rate. \n");
     serialReadState = SerialReadState::WaitingForStartByteA;
     recievePacketData.clear();
     serialPort.setInputParam(HAL::IO_PARAM_t::SPEED, 115200);
     serialPort.setOutputParam(HAL::IO_PARAM_t::SPEED, 115200);
+    standardBaudRate = true;
+  }
+
+  if (isSerialConnected &&
+      loopStart - lastValidPacketTime > 5000 * Core::MILLISECONDS) {
+    LOG_MSG("Connection timeout. No valid packets received for 5s. Marking as "
+            "disconnected. \n");
+    isSerialConnected = false;
+  }
+
+  if (loopStart - lastPacketSendTime > 500 * Core::MILLISECONDS) {
+    lastPacketSendTime = loopStart;
+    sendSerialPacket(SerialPacketType::Heartbeat, 0);
   }
 
   lastLoopTime = loopStart;
@@ -112,6 +122,11 @@ void ExVectrLinkSerialTelecoms::sendSerialPacket(
     sendDataBuffer.placeBack(data[i]);
   }
   sendDataBuffer.placeBack(static_cast<uint8_t>(SerialByteType::EndByte));
+  lastPacketSendTime = Core::NOW();
+}
+
+bool ExVectrLinkSerialTelecoms::isConnected() const {
+  return isSerialConnected;
 }
 
 void ExVectrLinkSerialTelecoms::decodeSerialByte(uint8_t incomingByte) {
@@ -150,6 +165,8 @@ void ExVectrLinkSerialTelecoms::decodeSerialByte(uint8_t incomingByte) {
   case SerialReadState::ReadingPacketData:
     if (incomingByte == SerialByteType::EndByte) {
       serialReadState = SerialReadState::WaitingForStartByteA;
+      lastValidPacketTime = Core::NOW();
+      isSerialConnected = true;
       // Process the packet
       for (size_t i = 0; i < serialPacketHandlers.size(); i++) {
         if (serialPacketHandlers[i].packetType == currentPacketType) {
