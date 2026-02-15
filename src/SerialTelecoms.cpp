@@ -33,9 +33,11 @@ void ExVectrLinkSerialTelecoms::taskInit() {
         if (data.size() == 4) {
           uint32_t baudRate =
               (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
-          serialPort.setInputParam(HAL::IO_PARAM_t::SPEED, baudRate);
-          serialPort.setOutputParam(HAL::IO_PARAM_t::SPEED, baudRate);
-          standardBaudRate = (baudRate == 115200);
+          if (baudRate != baudrate) {
+            sendSerialPacket(SerialPacketType::SetBaudRate, 0, data);
+            forcePacketSendNow();
+            setPortBaudRate(baudRate);
+          }
         }
       });
 }
@@ -64,15 +66,13 @@ void ExVectrLinkSerialTelecoms::taskThread() {
     serialPort.writeByte(byteToSend);
   }
 
-  if (lastSerialByteTime != lastLoopTime && !standardBaudRate &&
+  if (lastSerialByteTime != lastLoopTime && baudrate != standardBaudrate &&
       loopStart - lastSerialByteTime > 1000 * Core::MILLISECONDS) {
     LOG_MSG("Serial communication timeout. Resetting serial state and baud "
             "rate. \n");
     serialReadState = SerialReadState::WaitingForStartByteA;
     recievePacketData.clear();
-    serialPort.setInputParam(HAL::IO_PARAM_t::SPEED, 115200);
-    serialPort.setOutputParam(HAL::IO_PARAM_t::SPEED, 115200);
-    standardBaudRate = true;
+    setPortBaudRate(standardBaudrate);
   }
 
   if (isSerialConnected &&
@@ -127,6 +127,15 @@ void ExVectrLinkSerialTelecoms::sendSerialPacket(
 
 bool ExVectrLinkSerialTelecoms::isConnected() const {
   return isSerialConnected;
+}
+
+void ExVectrLinkSerialTelecoms::forcePacketSendNow(int64_t timeout) {
+  auto start = Core::NOW();
+  while (sendDataBuffer.size() > 0 && Core::NOW() - start < timeout) {
+    uint8_t byteToSend;
+    sendDataBuffer.takeFront(byteToSend);
+    serialPort.writeByte(byteToSend);
+  }
 }
 
 void ExVectrLinkSerialTelecoms::decodeSerialByte(uint8_t incomingByte) {
@@ -184,6 +193,12 @@ void ExVectrLinkSerialTelecoms::decodeSerialByte(uint8_t incomingByte) {
     serialReadState = SerialReadState::WaitingForStartByteA;
     break;
   }
+}
+
+void ExVectrLinkSerialTelecoms::setPortBaudRate(uint32_t baudrate) {
+  this->baudrate = baudrate;
+  serialPort.setInputParam(HAL::IO_PARAM_t::SPEED, baudrate);
+  serialPort.setOutputParam(HAL::IO_PARAM_t::SPEED, baudrate);
 }
 
 } // namespace VCTR::SerialTelecoms

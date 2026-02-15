@@ -29,6 +29,8 @@ enum SerialPacketType : uint8_t {
 
 class ExVectrLinkSerialTelecoms : public Core::Task_Periodic {
 private:
+  static constexpr uint32_t standardBaudrate = 115200;
+
   enum class SerialReadState {
     WaitingForStartByteA,
     WaitingForStartByteB,
@@ -72,8 +74,15 @@ public:
 
   bool isConnected() const;
 
+  /**
+   * @brief Will block and send everything currently waiting in the buffer.
+   */
+  void forcePacketSendNow(int64_t timeout = 500 * Core::MILLISECONDS);
+
 private:
   void decodeSerialByte(uint8_t incomingByte);
+
+  void setPortBaudRate(uint32_t baudrate);
 
   HAL::DigitalIO &serialPort;
 
@@ -93,7 +102,7 @@ private:
 
   Core::ListArray<SerialPacketHandler> serialPacketHandlers;
 
-  bool standardBaudRate = true;
+  uint32_t baudrate = standardBaudrate;
 
   bool isSerialConnected = false;
 };
