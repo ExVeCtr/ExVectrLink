@@ -6,6 +6,7 @@
 
 #include "ExVectrHAL/digital_io.hpp"
 
+#include "ExVectrCore/data_buffer.hpp"
 #include "ExVectrCore/list_array.hpp"
 #include "ExVectrCore/task_types.hpp"
 
@@ -69,6 +70,9 @@ public:
       std::function<void(uint8_t radioNum,
                          const Core::ListArray<uint8_t> &data)>
           handler);
+
+  void sendSerialPacket(const SerialPacketType &type, uint8_t radioNum,
+                        const void *data, size_t numBytes);
   void sendSerialPacket(const SerialPacketType &type, uint8_t radioNum,
                         const Core::ListArray<uint8_t> &data = {});
 

@@ -31,8 +31,7 @@ void ExVectrLinkSerialTelecoms::taskInit() {
       SerialPacketType::SetBaudRate,
       [this](uint8_t radioNum, const Core::ListArray<uint8_t> &data) {
         if (data.size() == 4) {
-          uint32_t baudRate =
-              (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+          uint32_t baudRate = *((uint32_t *)data.getPtr());
           if (baudRate != baudrate) {
             sendSerialPacket(SerialPacketType::SetBaudRate, 0, data);
             forcePacketSendNow();
@@ -97,15 +96,15 @@ void ExVectrLinkSerialTelecoms::addSerialPacketHandler(
   serialPacketHandlers.append({type, handler});
 }
 
-void ExVectrLinkSerialTelecoms::sendSerialPacket(
-    const SerialPacketType &type, uint8_t radioNum,
-    const Core::ListArray<uint8_t> &data) {
-
-  if (data.size() > 255) {
+void ExVectrLinkSerialTelecoms::sendSerialPacket(const SerialPacketType &type,
+                                                 uint8_t radioNum,
+                                                 const void *data,
+                                                 size_t numBytes) {
+  if (numBytes > 255) {
     LOG_MSG("Packet data was over 255 bytes. Not sending packet. \n");
     return;
   }
-  if (sendDataBuffer.size() + data.size() + 5 > 1024) {
+  if (sendDataBuffer.size() + numBytes + 5 > 1024) {
     LOG_MSG(
         "Send buffer overflow. Not sending packet. Consider increasing buffer "
         "size or sending less data.\n");
@@ -117,12 +116,18 @@ void ExVectrLinkSerialTelecoms::sendSerialPacket(
       static_cast<uint8_t>(SerialByteType::StartByteB + ExVectrLinkVersion));
   sendDataBuffer.placeBack(static_cast<uint8_t>(type));
   sendDataBuffer.placeBack(radioNum);
-  sendDataBuffer.placeBack(data.size());
-  for (size_t i = 0; i < data.size(); i++) {
-    sendDataBuffer.placeBack(data[i]);
+  sendDataBuffer.placeBack(numBytes);
+  for (size_t i = 0; i < numBytes; i++) {
+    sendDataBuffer.placeBack(((uint8_t *)data)[i]);
   }
   sendDataBuffer.placeBack(static_cast<uint8_t>(SerialByteType::EndByte));
   lastPacketSendTime = Core::NOW();
+}
+
+void ExVectrLinkSerialTelecoms::sendSerialPacket(
+    const SerialPacketType &type, uint8_t radioNum,
+    const Core::ListArray<uint8_t> &data) {
+  sendSerialPacket(type, radioNum, data.getPtr(), data.size());
 }
 
 bool ExVectrLinkSerialTelecoms::isConnected() const {
@@ -199,6 +204,7 @@ void ExVectrLinkSerialTelecoms::setPortBaudRate(uint32_t baudrate) {
   this->baudrate = baudrate;
   serialPort.setInputParam(HAL::IO_PARAM_t::SPEED, baudrate);
   serialPort.setOutputParam(HAL::IO_PARAM_t::SPEED, baudrate);
+  LOG_MSG("Setting port baudrate to: %d\n", baudrate);
 }
 
 } // namespace VCTR::SerialTelecoms
