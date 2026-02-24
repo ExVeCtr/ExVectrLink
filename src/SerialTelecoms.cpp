@@ -27,18 +27,18 @@ void ExVectrLinkSerialTelecoms::taskInit() {
   serialReadState = SerialReadState::WaitingForStartByteA;
   recievePacketData.clear();
 
-  addSerialPacketHandler(
-      SerialPacketType::SetBaudRate,
-      [this](uint8_t radioNum, const Core::ListArray<uint8_t> &data) {
-        if (data.size() == 4) {
-          uint32_t baudRate = *((uint32_t *)data.getPtr());
-          if (baudRate != baudrate) {
-            sendSerialPacket(SerialPacketType::SetBaudRate, 0, data);
-            forcePacketSendNow();
-            setPortBaudRate(baudRate);
-          }
-        }
-      });
+  addSerialPacketHandler(SerialPacketType::SetBaudRate,
+                         [this](const Core::ListArray<uint8_t> &data) {
+                           if (data.size() == 4) {
+                             uint32_t baudRate = *((uint32_t *)data.getPtr());
+                             if (baudRate != baudrate) {
+                               sendSerialPacket(SerialPacketType::SetBaudRate,
+                                                data);
+                               forcePacketSendNow();
+                               setPortBaudRate(baudRate);
+                             }
+                           }
+                         });
 }
 
 void ExVectrLinkSerialTelecoms::taskCheck() {
@@ -91,13 +91,11 @@ void ExVectrLinkSerialTelecoms::taskThread() {
 
 void ExVectrLinkSerialTelecoms::addSerialPacketHandler(
     const SerialPacketType &type,
-    std::function<void(uint8_t radioNum, const Core::ListArray<uint8_t> &data)>
-        handler) {
+    std::function<void(const Core::ListArray<uint8_t> &data)> handler) {
   serialPacketHandlers.append({type, handler});
 }
 
 void ExVectrLinkSerialTelecoms::sendSerialPacket(const SerialPacketType &type,
-                                                 uint8_t radioNum,
                                                  const void *data,
                                                  size_t numBytes) {
   if (numBytes > 255) {
@@ -115,7 +113,6 @@ void ExVectrLinkSerialTelecoms::sendSerialPacket(const SerialPacketType &type,
   sendDataBuffer.placeBack(
       static_cast<uint8_t>(SerialByteType::StartByteB + ExVectrLinkVersion));
   sendDataBuffer.placeBack(static_cast<uint8_t>(type));
-  sendDataBuffer.placeBack(radioNum);
   sendDataBuffer.placeBack(numBytes);
   for (size_t i = 0; i < numBytes; i++) {
     sendDataBuffer.placeBack(((uint8_t *)data)[i]);
@@ -125,9 +122,8 @@ void ExVectrLinkSerialTelecoms::sendSerialPacket(const SerialPacketType &type,
 }
 
 void ExVectrLinkSerialTelecoms::sendSerialPacket(
-    const SerialPacketType &type, uint8_t radioNum,
-    const Core::ListArray<uint8_t> &data) {
-  sendSerialPacket(type, radioNum, data.getPtr(), data.size());
+    const SerialPacketType &type, const Core::ListArray<uint8_t> &data) {
+  sendSerialPacket(type, data.getPtr(), data.size());
 }
 
 bool ExVectrLinkSerialTelecoms::isConnected() const {
@@ -162,11 +158,6 @@ void ExVectrLinkSerialTelecoms::decodeSerialByte(uint8_t incomingByte) {
 
   case SerialReadState::WaitingForPacketType:
     currentPacketType = static_cast<SerialPacketType>(incomingByte);
-    serialReadState = SerialReadState::WaitingForRadioNum;
-    break;
-
-  case SerialReadState::WaitingForRadioNum:
-    radioNum = incomingByte;
     serialReadState = SerialReadState::WaitingForPacketLength;
     break;
 
@@ -184,7 +175,7 @@ void ExVectrLinkSerialTelecoms::decodeSerialByte(uint8_t incomingByte) {
       // Process the packet
       for (size_t i = 0; i < serialPacketHandlers.size(); i++) {
         if (serialPacketHandlers[i].packetType == currentPacketType) {
-          serialPacketHandlers[i].processFunction(radioNum, recievePacketData);
+          serialPacketHandlers[i].processFunction(recievePacketData);
         }
       }
     } else if (recievePacketData.size() < 255) {

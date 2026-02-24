@@ -17,14 +17,16 @@ namespace VCTR::SerialTelecoms {
 constexpr uint8_t ExVectrLinkVersion = 1;
 
 enum SerialPacketType : uint8_t {
-  DataSend,        // Send the packet buffer contents.
-  DataReceived,    // Command to retrieve data.
-  DataInfo,        // Received Packet with RSSI, SNR and length info.
-  PacketDataClear, // Clears packet data buffer.
-  PacketData,      // Packet data. Max 255 bytes.
-  UpdateMode,      // Places ExVectrLink into Update mode
-  SetBaudRate,     // Sets the baud rate of the serial communication.
-  Heartbeat,       // Heartbeat timeout (1s) will reset baud to 115200.
+  DataSend,          // Send the packet buffer contents.
+  LinkInfo,          // Received Packet with RSSI, SNR and length info.
+  PacketDataClear,   // Clears packet data buffer.
+  PacketData,        // Packet data. Max 255 bytes.
+  UpdateMode,        // Places ExVectrLink into Update mode
+  SetBaudRate,       // Sets the baud rate of the serial communication.
+  Heartbeat,         // Heartbeat timeout (1s) will reset baud to 115200.
+  ChannelBlocked,    // Cannot send data.
+  ChannelFree,       // Can send data.
+  DeviceTemperature, // Send device temperature.
   Error,
 };
 
@@ -36,7 +38,6 @@ private:
     WaitingForStartByteA,
     WaitingForStartByteB,
     WaitingForPacketType,
-    WaitingForRadioNum,
     WaitingForPacketLength,
     ReadingPacketData,
     WaitingForEndByte
@@ -45,8 +46,6 @@ private:
   struct SerialPacketCommand {
     // Command type.
     SerialPacketType packetType;
-    // Radio if applicable.
-    uint8_t radioNum;
     // Packet data. Max 255 bytes.
     Core::ListArray<uint8_t> packetData;
   };
@@ -54,8 +53,7 @@ private:
   struct SerialPacketHandler {
     // Command type to call handler on.
     SerialPacketType packetType;
-    std::function<void(uint8_t radioNum, const Core::ListArray<uint8_t> &data)>
-        processFunction;
+    std::function<void(const Core::ListArray<uint8_t> &data)> processFunction;
   };
 
 public:
@@ -67,13 +65,11 @@ public:
 
   void addSerialPacketHandler(
       const SerialPacketType &type,
-      std::function<void(uint8_t radioNum,
-                         const Core::ListArray<uint8_t> &data)>
-          handler);
+      std::function<void(const Core::ListArray<uint8_t> &data)> handler);
 
-  void sendSerialPacket(const SerialPacketType &type, uint8_t radioNum,
-                        const void *data, size_t numBytes);
-  void sendSerialPacket(const SerialPacketType &type, uint8_t radioNum,
+  void sendSerialPacket(const SerialPacketType &type, const void *data,
+                        size_t numBytes);
+  void sendSerialPacket(const SerialPacketType &type,
                         const Core::ListArray<uint8_t> &data = {});
 
   bool isConnected() const;
@@ -95,7 +91,6 @@ private:
   Core::ListArray<uint8_t> recievePacketData;
   SerialPacketType currentPacketType;
   uint8_t packetLength;
-  uint8_t radioNum;
 
   Core::ListBuffer<uint8_t, 1024> sendDataBuffer;
 
