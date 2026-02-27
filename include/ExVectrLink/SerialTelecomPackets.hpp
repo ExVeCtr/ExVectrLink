@@ -28,11 +28,15 @@ enum SerialPacketType : uint8_t {
 };
 
 template <typename T>
-concept SerializablePacket = requires(T a, uint8_t *buffer) {
-  { a.numBytes() } -> std::convertible_to<uint8_t>;
-  { a.serialize(buffer) } -> std::same_as<void>;
-  { T::deserialize(buffer) } -> std::same_as<T>;
-};
+concept SerializablePacket =
+    requires(const T a, uint8_t *buffer, const uint8_t *readBuffer) {
+      {
+        a.getPacketType()
+      } -> std::same_as<VCTR::SerialTelecoms::packets::SerialPacketType>;
+      { a.numBytes() } -> std::convertible_to<uint8_t>;
+      { a.serialize(buffer) } -> std::same_as<void>;
+      { T::deserialize(readBuffer) } -> std::same_as<T>;
+    };
 
 namespace VCTR::SerialTelecoms::packets {
 
@@ -40,8 +44,11 @@ class SerialPacket_SetModulationPreset {
 public:
   uint8_t presetIndex;
 
-  uint8_t numBytes() { return 1; }
-  void serialize(uint8_t *buffer) { buffer[0] = presetIndex; }
+  SerialPacketType getPacketType() const {
+    return SerialPacketType::SetModulationPreset;
+  }
+  uint8_t numBytes() const { return 1; }
+  void serialize(uint8_t *buffer) const { buffer[0] = presetIndex; }
   static SerialPacket_SetModulationPreset deserialize(const uint8_t *buffer) {
     SerialPacket_SetModulationPreset packet;
     packet.presetIndex = buffer[0];
@@ -53,8 +60,11 @@ class SerialPacket_SetLinkChannel {
 public:
   uint8_t channelIndex; // 0-9
 
-  uint8_t numBytes() { return 1; }
-  void serialize(uint8_t *buffer) { buffer[0] = channelIndex; }
+  SerialPacketType getPacketType() const {
+    return SerialPacketType::SetLinkChannel;
+  }
+  uint8_t numBytes() const { return 1; }
+  void serialize(uint8_t *buffer) const { buffer[0] = channelIndex; }
   static SerialPacket_SetLinkChannel deserialize(const uint8_t *buffer) {
     SerialPacket_SetLinkChannel packet;
     packet.channelIndex = buffer[0];
@@ -66,8 +76,11 @@ class SerialPacket_DeviceTemperature {
 public:
   int8_t temperatureC; // Temperature in Celsius.
 
-  uint8_t numBytes() { return 1; }
-  void serialize(uint8_t *buffer) { buffer[0] = temperatureC; }
+  SerialPacketType getPacketType() const {
+    return SerialPacketType::DeviceTemperature;
+  }
+  uint8_t numBytes() const { return 1; }
+  void serialize(uint8_t *buffer) const { buffer[0] = temperatureC; }
   static SerialPacket_DeviceTemperature deserialize(const uint8_t *buffer) {
     SerialPacket_DeviceTemperature packet;
     packet.temperatureC = buffer[0];
@@ -79,8 +92,11 @@ class SerialPacket_SetBaudRate {
 public:
   uint32_t baudRate;
 
-  uint8_t numBytes() { return 4; }
-  void serialize(uint8_t *buffer) {
+  SerialPacketType getPacketType() const {
+    return SerialPacketType::SetBaudRate;
+  }
+  uint8_t numBytes() const { return 4; }
+  void serialize(uint8_t *buffer) const {
     buffer[0] = baudRate & 0xFF;
     buffer[1] = (baudRate >> 8) & 0xFF;
     buffer[2] = (baudRate >> 16) & 0xFF;
@@ -98,8 +114,9 @@ class SerialPacket_InitLink {
 public:
   uint8_t mak; // Media Access Key for FHSS.
 
-  uint8_t numBytes() { return 1; }
-  void serialize(uint8_t *buffer) { buffer[0] = mak; }
+  SerialPacketType getPacketType() const { return SerialPacketType::InitLink; }
+  uint8_t numBytes() const { return 1; }
+  void serialize(uint8_t *buffer) const { buffer[0] = mak; }
   static SerialPacket_InitLink deserialize(const uint8_t *buffer) {
     SerialPacket_InitLink packet;
     packet.mak = buffer[0];
@@ -117,8 +134,9 @@ public:
 
   bool dualLinkMode;
 
-  uint8_t numBytes() { return 5; }
-  void serialize(uint8_t *buffer) {
+  SerialPacketType getPacketType() const { return SerialPacketType::LinkInfo; }
+  uint8_t numBytes() const { return 5; }
+  void serialize(uint8_t *buffer) const {
     buffer[0] = rssi;
     buffer[1] = snr;
     buffer[2] = antenna;

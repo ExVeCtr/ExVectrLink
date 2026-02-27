@@ -56,14 +56,10 @@ public:
       std::function<void(const Core::ListArray<uint8_t> &data)> handler);
 
   template <SerializablePacket T>
-  void addSerialPacketHandler(
-      const VCTR::SerialTelecoms::packets::SerialPacketType &type,
-      std::function<void(const T &data)> handler) {
-    addSerialPacketHandler(type,
+  void addSerialPacketHandler(std::function<void(const T &packet)> handler) {
+    addSerialPacketHandler(T().getPacketType(),
                            [handler](const Core::ListArray<uint8_t> &data) {
-                             if (data.size() == T().numBytes()) {
-                               handler(T::deserialize(data.getPtr()));
-                             }
+                             handler(T::deserialize(data.getPtr()));
                            });
   }
 
@@ -74,13 +70,10 @@ public:
   sendSerialPacket(const VCTR::SerialTelecoms::packets::SerialPacketType &type,
                    const Core::ListArray<uint8_t> &data = {});
 
-  template <SerializablePacket T>
-  void
-  sendSerialPacket(const VCTR::SerialTelecoms::packets::SerialPacketType &type,
-                   const T &packet) {
+  template <SerializablePacket T> void sendSerialPacket(const T &packet) {
     Core::ListArray<uint8_t> data(packet.numBytes());
     packet.serialize(data.getPtr());
-    sendSerialPacket(type, data);
+    sendSerialPacket(packet.getPacketType(), data);
   }
 
   bool isConnected() const;
