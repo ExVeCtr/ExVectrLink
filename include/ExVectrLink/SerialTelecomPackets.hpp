@@ -10,6 +10,7 @@ enum SerialPacketType : uint8_t {
   PacketData, // Packet data. Max 255 bytes.
 
   SetModulationPreset, // Set the modulation preset of the radio link.
+  SetTxPower,          // Set the Tx power of the radio link. 0-20 dBm.
   SetLinkChannel,      // Set the channel of the radio link. 0-9. Stops FHSS.
   StartFHSS,           // Start FHSS. Requires 4 byte key and TxRx ratio.
 
@@ -52,6 +53,22 @@ public:
   static SerialPacket_SetModulationPreset deserialize(const uint8_t *buffer) {
     SerialPacket_SetModulationPreset packet;
     packet.presetIndex = buffer[0];
+    return packet;
+  }
+};
+
+class SerialPacket_SetTxPower {
+public:
+  uint8_t txPower; // Tx power in dBm. 0-20.
+
+  SerialPacketType getPacketType() const {
+    return SerialPacketType::SetTxPower;
+  }
+  uint8_t numBytes() const { return 1; }
+  void serialize(uint8_t *buffer) const { buffer[0] = txPower; }
+  static SerialPacket_SetTxPower deserialize(const uint8_t *buffer) {
+    SerialPacket_SetTxPower packet;
+    packet.txPower = buffer[0];
     return packet;
   }
 };

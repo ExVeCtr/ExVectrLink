@@ -16,7 +16,7 @@ namespace VCTR::SerialTelecoms {
 
 /// @brief  Current ExVectrLink version.
 /// Will be incremented if incompatible changes have been made.
-constexpr uint8_t ExVectrLinkVersion = 2;
+constexpr uint8_t ExVectrLinkVersion = 3;
 
 class ExVectrLinkSerialTelecoms : public Core::Task_Periodic {
 private:
