@@ -10,25 +10,13 @@
 #include "ExVectrCore/list_array.hpp"
 #include "ExVectrCore/task_types.hpp"
 
+#include "ExVectrLink/SerialTelecomPackets.hpp"
+
 namespace VCTR::SerialTelecoms {
 
 /// @brief  Current ExVectrLink version.
 /// Will be incremented if incompatible changes have been made.
-constexpr uint8_t ExVectrLinkVersion = 1;
-
-enum SerialPacketType : uint8_t {
-  DataSend,          // Send the packet buffer contents.
-  LinkInfo,          // Received Packet with RSSI, SNR and length info.
-  PacketDataClear,   // Clears packet data buffer.
-  PacketData,        // Packet data. Max 255 bytes.
-  UpdateMode,        // Places ExVectrLink into Update mode
-  SetBaudRate,       // Sets the baud rate of the serial communication.
-  Heartbeat,         // Heartbeat timeout (1s) will reset baud to 115200.
-  ChannelBlocked,    // Cannot send data.
-  ChannelFree,       // Can send data.
-  DeviceTemperature, // Send device temperature.
-  Error,
-};
+constexpr uint8_t ExVectrLinkVersion = 2;
 
 class ExVectrLinkSerialTelecoms : public Core::Task_Periodic {
 private:
@@ -45,14 +33,14 @@ private:
 
   struct SerialPacketCommand {
     // Command type.
-    SerialPacketType packetType;
+    VCTR::SerialTelecoms::packets::SerialPacketType packetType;
     // Packet data. Max 255 bytes.
     Core::ListArray<uint8_t> packetData;
   };
 
   struct SerialPacketHandler {
     // Command type to call handler on.
-    SerialPacketType packetType;
+    VCTR::SerialTelecoms::packets::SerialPacketType packetType;
     std::function<void(const Core::ListArray<uint8_t> &data)> processFunction;
   };
 
@@ -64,13 +52,36 @@ public:
   void taskThread() override;
 
   void addSerialPacketHandler(
-      const SerialPacketType &type,
+      const VCTR::SerialTelecoms::packets::SerialPacketType &type,
       std::function<void(const Core::ListArray<uint8_t> &data)> handler);
 
-  void sendSerialPacket(const SerialPacketType &type, const void *data,
-                        size_t numBytes);
-  void sendSerialPacket(const SerialPacketType &type,
-                        const Core::ListArray<uint8_t> &data = {});
+  template <SerializablePacket T>
+  void addSerialPacketHandler(
+      const VCTR::SerialTelecoms::packets::SerialPacketType &type,
+      std::function<void(const T &data)> handler) {
+    addSerialPacketHandler(type,
+                           [handler](const Core::ListArray<uint8_t> &data) {
+                             if (data.size() == T().numBytes()) {
+                               handler(T::deserialize(data.getPtr()));
+                             }
+                           });
+  }
+
+  void
+  sendSerialPacket(const VCTR::SerialTelecoms::packets::SerialPacketType &type,
+                   const void *data, size_t numBytes);
+  void
+  sendSerialPacket(const VCTR::SerialTelecoms::packets::SerialPacketType &type,
+                   const Core::ListArray<uint8_t> &data = {});
+
+  template <SerializablePacket T>
+  void
+  sendSerialPacket(const VCTR::SerialTelecoms::packets::SerialPacketType &type,
+                   const T &packet) {
+    Core::ListArray<uint8_t> data(packet.numBytes());
+    packet.serialize(data.getPtr());
+    sendSerialPacket(type, data);
+  }
 
   bool isConnected() const;
 
@@ -89,7 +100,7 @@ private:
   SerialReadState serialReadState = SerialReadState::WaitingForStartByteA;
 
   Core::ListArray<uint8_t> recievePacketData;
-  SerialPacketType currentPacketType;
+  VCTR::SerialTelecoms::packets::SerialPacketType currentPacketType;
   uint8_t packetLength;
 
   Core::ListBuffer<uint8_t, 1024> sendDataBuffer;
@@ -108,4 +119,4 @@ private:
 
 } // namespace VCTR::SerialTelecoms
 
-#endif // ExVectrLink_SerialTelecoms_HPP
+#endif // EXVECTRLINK_SERIALTELECOMS_HPP

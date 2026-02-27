@@ -3,7 +3,7 @@
 #include "ExVectrCore/task_types.hpp"
 
 #include "ExVectrNetwork/DataPacket.hpp"
-#include "ExVectrNetwork/datalink/DatalinkI.hpp"
+#include "ExVectrNetwork/datalink/RadioI.hpp"
 #include "ExVectrNetwork/datalink/sx1280/Sx1280.hpp"
 
 #include "ExVectrLink/datalink/Sx1280Diversity.hpp"
@@ -99,6 +99,24 @@ bool Sx1280Diversity::isChannelBlocked() const {
     blocked = blocked || diversityLinks[i].link->isChannelBlocked();
   }
   return blocked;
+}
+
+size_t Sx1280Diversity::getNumChannels() const {
+  if (diversityLinks.size() == 0) {
+    return 0;
+  }
+  return diversityLinks[0].link->getNumChannels();
+}
+size_t Sx1280Diversity::getCurrentChannel() const {
+  if (diversityLinks.size() == 0) {
+    return 0;
+  }
+  return diversityLinks[0].link->getCurrentChannel();
+}
+void Sx1280Diversity::setCurrentChannel(size_t channel) {
+  for (size_t i = 0; i < diversityLinks.size(); i++) {
+    diversityLinks[i].link->setCurrentChannel(channel);
+  }
 }
 
 void Sx1280Diversity::startReceiveOnAllLinks() {

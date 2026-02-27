@@ -7,9 +7,13 @@
 #include "ExVectrCore/task_types.hpp"
 #include "ExVectrCore/time_definitions.hpp"
 
+#include "ExVectrLink/SerialTelecomPackets.hpp"
+
 #include "ExVectrLink/SerialTelecoms.hpp"
 
 namespace VCTR::SerialTelecoms {
+
+using namespace VCTR::SerialTelecoms::packets;
 
 enum SerialByteType : uint8_t {
   StartByteA = 0x7E,

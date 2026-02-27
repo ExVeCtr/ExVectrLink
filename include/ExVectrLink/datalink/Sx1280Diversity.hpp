@@ -6,12 +6,12 @@
 #include "ExVectrCore/task_types.hpp"
 
 #include "ExVectrNetwork/DataPacket.hpp"
-#include "ExVectrNetwork/datalink/DatalinkI.hpp"
+#include "ExVectrNetwork/datalink/RadioI.hpp"
 #include "ExVectrNetwork/datalink/sx1280/Sx1280.hpp"
 
 namespace VCTR::ExVectrLink::datalink {
 
-class Sx1280Diversity : public VCTR::network::datalink::DatalinkI {
+class Sx1280Diversity : public VCTR::network::datalink::RadioI {
 private:
   struct Sx1280PacketRfInfo {
     int16_t rssi;
@@ -55,6 +55,10 @@ public:
    * dataframes.
    */
   bool isChannelBlocked() const override;
+
+  size_t getNumChannels() const override;
+  size_t getCurrentChannel() const override;
+  void setCurrentChannel(size_t channel) override;
 
 private:
   void startReceiveOnAllLinks();
