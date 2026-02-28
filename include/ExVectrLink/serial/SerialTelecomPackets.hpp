@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-namespace VCTR::SerialTelecoms::packets {
+namespace VCTR::ExVectrLink::packets {
 
 enum SerialPacketType : uint8_t {
   DataSend,   // Send the packet buffer contents.
@@ -12,7 +12,7 @@ enum SerialPacketType : uint8_t {
   SetModulationPreset, // Set the modulation preset of the radio link.
   SetTxPower,          // Set the Tx power of the radio link. 0-20 dBm.
   SetLinkChannel,      // Set the channel of the radio link. 0-9. Stops FHSS.
-  StartFHSS,           // Start FHSS. Requires 4 byte key and TxRx ratio.
+  StartFHSS,           // Start FHSS. Requires 4 byte key.
 
   DeviceTemperature, // Send device temperature.
   FhssSynced,        // Sent when FHSS sync is achieved.
@@ -26,20 +26,18 @@ enum SerialPacketType : uint8_t {
   InitLink, // Send to startup the link and also set the Media access key (MAK).
 };
 
-};
-
 template <typename T>
 concept SerializablePacket =
     requires(const T a, uint8_t *buffer, const uint8_t *readBuffer) {
-      {
-        a.getPacketType()
-      } -> std::same_as<VCTR::SerialTelecoms::packets::SerialPacketType>;
+      { a.getPacketType() } -> std::same_as<SerialPacketType>;
       { a.numBytes() } -> std::convertible_to<uint8_t>;
       { a.serialize(buffer) } -> std::same_as<void>;
       { T::deserialize(readBuffer) } -> std::same_as<T>;
     };
 
-namespace VCTR::SerialTelecoms::packets {
+}; // namespace VCTR::ExVectrLink::packets
+
+namespace VCTR::ExVectrLink::packets {
 
 class SerialPacket_SetModulationPreset {
 public:
@@ -85,6 +83,29 @@ public:
   static SerialPacket_SetLinkChannel deserialize(const uint8_t *buffer) {
     SerialPacket_SetLinkChannel packet;
     packet.channelIndex = buffer[0];
+    return packet;
+  }
+};
+
+class SerialPacket_SetEnableFhss {
+public:
+  bool enable;
+  uint32_t seqKey; // Sequence key for FHSS.
+
+  SerialPacketType getPacketType() const { return SerialPacketType::StartFHSS; }
+  uint8_t numBytes() const { return 5; }
+  void serialize(uint8_t *buffer) const {
+    buffer[0] = enable ? 1 : 0;
+    buffer[1] = seqKey & 0xFF;
+    buffer[2] = (seqKey >> 8) & 0xFF;
+    buffer[3] = (seqKey >> 16) & 0xFF;
+    buffer[4] = (seqKey >> 24) & 0xFF;
+  }
+  static SerialPacket_SetEnableFhss deserialize(const uint8_t *buffer) {
+    SerialPacket_SetEnableFhss packet;
+    packet.enable = buffer[0] == 1;
+    packet.seqKey =
+        buffer[1] | (buffer[2] << 8) | (buffer[3] << 16) | (buffer[4] << 24);
     return packet;
   }
 };
@@ -171,6 +192,6 @@ public:
   }
 };
 
-} // namespace VCTR::SerialTelecoms::packets
+} // namespace VCTR::ExVectrLink::packets
 
 #endif // EXVECTRLINK_SERIALTELECOMPACKETS_HPP

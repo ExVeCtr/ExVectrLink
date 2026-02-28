@@ -6,19 +6,19 @@
 
 #include "ExVectrHAL/digital_io.hpp"
 
-#include "ExVectrCore/data_buffer.hpp"
 #include "ExVectrCore/list_array.hpp"
 #include "ExVectrCore/task_types.hpp"
 
-#include "ExVectrLink/SerialTelecomPackets.hpp"
+#include "ExVectrLink/ExVectrLinkI.hpp"
+#include "ExVectrLink/serial/SerialTelecomPackets.hpp"
 
-namespace VCTR::SerialTelecoms {
+namespace VCTR::ExVectrLink /* ExVectrLinkSerialTelecoms */ {
 
 /// @brief  Current ExVectrLink version.
 /// Will be incremented if incompatible changes have been made.
 constexpr uint8_t ExVectrLinkVersion = 3;
 
-class ExVectrLinkSerialTelecoms : public Core::Task_Periodic {
+class SerialTelecoms : public Core::Task_Periodic {
 private:
   static constexpr uint32_t standardBaudrate = 115200;
 
@@ -33,29 +33,29 @@ private:
 
   struct SerialPacketCommand {
     // Command type.
-    VCTR::SerialTelecoms::packets::SerialPacketType packetType;
+    VCTR::ExVectrLink::packets::SerialPacketType packetType;
     // Packet data. Max 255 bytes.
     Core::ListArray<uint8_t> packetData;
   };
 
   struct SerialPacketHandler {
     // Command type to call handler on.
-    VCTR::SerialTelecoms::packets::SerialPacketType packetType;
+    VCTR::ExVectrLink::packets::SerialPacketType packetType;
     std::function<void(const Core::ListArray<uint8_t> &data)> processFunction;
   };
 
 public:
-  ExVectrLinkSerialTelecoms(HAL::DigitalIO &serialPort);
+  SerialTelecoms(HAL::DigitalIO &serialPort);
 
   void taskInit() override;
   void taskCheck() override;
   void taskThread() override;
 
   void addSerialPacketHandler(
-      const VCTR::SerialTelecoms::packets::SerialPacketType &type,
+      const VCTR::ExVectrLink::packets::SerialPacketType &type,
       std::function<void(const Core::ListArray<uint8_t> &data)> handler);
 
-  template <SerializablePacket T>
+  template <VCTR::ExVectrLink::packets::SerializablePacket T>
   void addSerialPacketHandler(std::function<void(const T &packet)> handler) {
     addSerialPacketHandler(T().getPacketType(),
                            [handler](const Core::ListArray<uint8_t> &data) {
@@ -64,13 +64,14 @@ public:
   }
 
   void
-  sendSerialPacket(const VCTR::SerialTelecoms::packets::SerialPacketType &type,
+  sendSerialPacket(const VCTR::ExVectrLink::packets::SerialPacketType &type,
                    const void *data, size_t numBytes);
   void
-  sendSerialPacket(const VCTR::SerialTelecoms::packets::SerialPacketType &type,
+  sendSerialPacket(const VCTR::ExVectrLink::packets::SerialPacketType &type,
                    const Core::ListArray<uint8_t> &data = {});
 
-  template <SerializablePacket T> void sendSerialPacket(const T &packet) {
+  template <VCTR::ExVectrLink::packets::SerializablePacket T>
+  void sendSerialPacket(const T &packet) {
     Core::ListArray<uint8_t> data(packet.numBytes());
     packet.serialize(data.getPtr());
     sendSerialPacket(packet.getPacketType(), data);
@@ -93,7 +94,7 @@ private:
   SerialReadState serialReadState = SerialReadState::WaitingForStartByteA;
 
   Core::ListArray<uint8_t> recievePacketData;
-  VCTR::SerialTelecoms::packets::SerialPacketType currentPacketType;
+  VCTR::ExVectrLink::packets::SerialPacketType currentPacketType;
   uint8_t packetLength;
 
   Core::ListBuffer<uint8_t, 1024> sendDataBuffer;
@@ -110,6 +111,55 @@ private:
   bool isSerialConnected = false;
 };
 
-} // namespace VCTR::SerialTelecoms
+} // namespace VCTR::ExVectrLink
+
+namespace VCTR::ExVectrLink /* SerialTelecomsDatalink */ {
+
+class SerialTelecomsDatalink : public VCTR::ExVectrLink::ExVectrLinkI {
+public:
+  SerialTelecomsDatalink(SerialTelecoms &telecoms);
+
+  // --------------- DatalinkI implementation ---------------
+
+  bool transmitDataframe(const VCTR::network::DataPacket &dataframe) override;
+
+  /**
+   * @brief Get the maximum packet size that can be transmitted by the datalink.
+   * @note packets over this size will be dropped and not transmitted.
+   * @return size_t The maximum packet size in bytes.
+   */
+  size_t getMaxPacketSize() const override;
+
+  /**
+   * @returns true if the datalink is currently blocked and cannot send
+   * dataframes.
+   */
+  bool isChannelBlocked() const override;
+
+  // --------------- ExVectrLinkI implementation ---------------
+
+  void setTxPower(uint8_t txPower) override;
+
+  void setModulationPreset(
+      VCTR::ExVectrLink::datalink::ModulationPresets preset) override;
+
+  void setEnableFhss(bool enable, uint32_t seqKey = 0) override;
+
+  // Channel index 0-9. Stops FHSS if enabled.
+  void setLinkChannel(uint8_t channelIndex) override;
+
+  void setMediaAccessKey(uint8_t mak) override;
+
+  const VCTR::ExVectrLink::datalink::LinkInfo &getLinkInfo() const override;
+
+private:
+  void addHandlers();
+
+  SerialTelecoms &telecoms;
+
+  VCTR::ExVectrLink::datalink::LinkInfo linkinfo;
+};
+
+} // namespace VCTR::ExVectrLink
 
 #endif // EXVECTRLINK_SERIALTELECOMS_HPP

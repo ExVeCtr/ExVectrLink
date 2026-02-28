@@ -7,13 +7,13 @@
 #include "ExVectrCore/task_types.hpp"
 #include "ExVectrCore/time_definitions.hpp"
 
-#include "ExVectrLink/SerialTelecomPackets.hpp"
+#include "ExVectrLink/serial/SerialTelecomPackets.hpp"
 
-#include "ExVectrLink/SerialTelecoms.hpp"
+#include "ExVectrLink/serial/SerialTelecoms.hpp"
 
-namespace VCTR::SerialTelecoms {
+namespace VCTR::ExVectrLink {
 
-using namespace VCTR::SerialTelecoms::packets;
+using namespace VCTR::ExVectrLink::packets;
 
 enum SerialByteType : uint8_t {
   StartByteA = 0x7E,
@@ -21,13 +21,13 @@ enum SerialByteType : uint8_t {
   EndByte = 0x7F,
 };
 
-ExVectrLinkSerialTelecoms::ExVectrLinkSerialTelecoms(HAL::DigitalIO &serialPort)
+SerialTelecoms::SerialTelecoms(HAL::DigitalIO &serialPort)
     : Core::Task_Periodic("Serial Communication", Core::MILLISECONDS * 100),
       serialPort(serialPort) {
   Core::getSystemScheduler().addTask(*this);
 }
 
-void ExVectrLinkSerialTelecoms::taskInit() {
+void SerialTelecoms::taskInit() {
   serialReadState = SerialReadState::WaitingForStartByteA;
   recievePacketData.clear();
 
@@ -45,13 +45,13 @@ void ExVectrLinkSerialTelecoms::taskInit() {
                          });
 }
 
-void ExVectrLinkSerialTelecoms::taskCheck() {
+void SerialTelecoms::taskCheck() {
   if (serialPort.readable() > 0 || sendDataBuffer.size() > 0) {
     setDeadline(Core::NOW());
   }
 }
 
-void ExVectrLinkSerialTelecoms::taskThread() {
+void SerialTelecoms::taskThread() {
   int64_t loopStart = Core::NOW();
 
   while (serialPort.readable() > 0 &&
@@ -93,15 +93,14 @@ void ExVectrLinkSerialTelecoms::taskThread() {
   lastLoopTime = loopStart;
 }
 
-void ExVectrLinkSerialTelecoms::addSerialPacketHandler(
+void SerialTelecoms::addSerialPacketHandler(
     const SerialPacketType &type,
     std::function<void(const Core::ListArray<uint8_t> &data)> handler) {
   serialPacketHandlers.append({type, handler});
 }
 
-void ExVectrLinkSerialTelecoms::sendSerialPacket(const SerialPacketType &type,
-                                                 const void *data,
-                                                 size_t numBytes) {
+void SerialTelecoms::sendSerialPacket(const SerialPacketType &type,
+                                      const void *data, size_t numBytes) {
   if (numBytes > 255) {
     LOG_MSG("Packet data was over 255 bytes. Not sending packet. \n");
     return;
@@ -125,16 +124,14 @@ void ExVectrLinkSerialTelecoms::sendSerialPacket(const SerialPacketType &type,
   lastPacketSendTime = Core::NOW();
 }
 
-void ExVectrLinkSerialTelecoms::sendSerialPacket(
-    const SerialPacketType &type, const Core::ListArray<uint8_t> &data) {
+void SerialTelecoms::sendSerialPacket(const SerialPacketType &type,
+                                      const Core::ListArray<uint8_t> &data) {
   sendSerialPacket(type, data.getPtr(), data.size());
 }
 
-bool ExVectrLinkSerialTelecoms::isConnected() const {
-  return isSerialConnected;
-}
+bool SerialTelecoms::isConnected() const { return isSerialConnected; }
 
-void ExVectrLinkSerialTelecoms::forcePacketSendNow(int64_t timeout) {
+void SerialTelecoms::forcePacketSendNow(int64_t timeout) {
   auto start = Core::NOW();
   while (sendDataBuffer.size() > 0 && Core::NOW() - start < timeout) {
     uint8_t byteToSend;
@@ -143,7 +140,7 @@ void ExVectrLinkSerialTelecoms::forcePacketSendNow(int64_t timeout) {
   }
 }
 
-void ExVectrLinkSerialTelecoms::decodeSerialByte(uint8_t incomingByte) {
+void SerialTelecoms::decodeSerialByte(uint8_t incomingByte) {
   switch (serialReadState) {
   case SerialReadState::WaitingForStartByteA:
     if (incomingByte == SerialByteType::StartByteA) {
@@ -195,11 +192,87 @@ void ExVectrLinkSerialTelecoms::decodeSerialByte(uint8_t incomingByte) {
   }
 }
 
-void ExVectrLinkSerialTelecoms::setPortBaudRate(uint32_t baudrate) {
+void SerialTelecoms::setPortBaudRate(uint32_t baudrate) {
   this->baudrate = baudrate;
   serialPort.setInputParam(HAL::IO_PARAM_t::SPEED, baudrate);
   serialPort.setOutputParam(HAL::IO_PARAM_t::SPEED, baudrate);
   LOG_MSG("Setting port baudrate to: %d\n", baudrate);
 }
 
-} // namespace VCTR::SerialTelecoms
+} // namespace VCTR::ExVectrLink
+
+namespace VCTR::ExVectrLink /* SerialTelecomsDatalink */ {
+SerialTelecomsDatalink::SerialTelecomsDatalink(SerialTelecoms &telecoms)
+    : telecoms(telecoms) {
+  addHandlers();
+}
+
+bool SerialTelecomsDatalink::transmitDataframe(
+    const VCTR::network::DataPacket &dataframe) {
+  if (dataframe.payload.size() > getMaxPacketSize()) {
+    LOG_MSG("Dataframe size exceeds maximum packet size. Not transmitting.\n");
+    return false;
+  }
+  telecoms.sendSerialPacket(SerialPacketType::PacketData, dataframe.payload);
+  return true;
+}
+
+/**
+ * @brief Get the maximum packet size that can be transmitted by the datalink.
+ * @note packets over this size will be dropped and not transmitted.
+ * @return size_t The maximum packet size in bytes.
+ */
+size_t SerialTelecomsDatalink::getMaxPacketSize() const { return 250; }
+
+/**
+ * @returns true if the datalink is currently blocked and cannot send
+ * dataframes.
+ */
+bool SerialTelecomsDatalink::isChannelBlocked() const { return false; }
+
+void SerialTelecomsDatalink::addHandlers() {
+  telecoms.addSerialPacketHandler(SerialPacketType::PacketData,
+                                  [this](const Core::ListArray<uint8_t> &data) {
+                                    network::DataPacket packet(data);
+                                    receiveHandlers_.callHandlers(packet);
+                                  });
+  telecoms.addSerialPacketHandler<SerialPacket_LinkInfo>(
+      [this](const SerialPacket_LinkInfo &packet) {
+        linkinfo = {packet.rssi, packet.snr, packet.antenna, packet.lossRate,
+                    packet.dualLinkMode};
+      });
+}
+
+void SerialTelecomsDatalink::setTxPower(uint8_t txPower) {
+  telecoms.sendSerialPacket<SerialPacket_SetTxPower>(
+      SerialPacket_SetTxPower{txPower});
+}
+
+void SerialTelecomsDatalink::setModulationPreset(
+    VCTR::ExVectrLink::datalink::ModulationPresets preset) {
+  uint8_t presetByte = static_cast<uint8_t>(preset);
+  telecoms.sendSerialPacket<SerialPacket_SetModulationPreset>(
+      SerialPacket_SetModulationPreset{presetByte});
+}
+
+void SerialTelecomsDatalink::setEnableFhss(bool enable, uint32_t seqKey) {
+  telecoms.sendSerialPacket<SerialPacket_SetEnableFhss>(
+      SerialPacket_SetEnableFhss{enable, seqKey});
+}
+
+// Channel index 0-9. Stops FHSS if enabled.
+void SerialTelecomsDatalink::setLinkChannel(uint8_t channelIndex) {
+  telecoms.sendSerialPacket<SerialPacket_SetLinkChannel>(
+      SerialPacket_SetLinkChannel{channelIndex});
+}
+
+void SerialTelecomsDatalink::setMediaAccessKey(uint8_t mak) {
+  telecoms.sendSerialPacket<SerialPacket_InitLink>(SerialPacket_InitLink{mak});
+}
+
+const VCTR::ExVectrLink::datalink::LinkInfo &
+SerialTelecomsDatalink::getLinkInfo() const {
+  return linkinfo;
+}
+
+} // namespace VCTR::ExVectrLink

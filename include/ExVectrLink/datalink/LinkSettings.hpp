@@ -36,6 +36,16 @@ const ModulationParams modulationPresets[] = {
      VCTR::network::datalink::SX1280_CR::LI_4_8}, // LongRange
 };
 
+struct LinkInfo {
+  int8_t rssi;
+  int8_t snr;
+  uint8_t antenna; // Current antenna in use.
+
+  uint8_t lossRate; // percentage of packets lost. 0 good, 100 all.
+
+  bool dualLinkMode;
+};
+
 } // namespace VCTR::ExVectrLink::datalink
 
 #endif // EXVECTRLINK_LINKSETTINGS_HPP
