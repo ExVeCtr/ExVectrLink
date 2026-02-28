@@ -113,9 +113,9 @@ size_t Sx1280Diversity::getCurrentChannel() const {
   }
   return diversityLinks[0].link->getCurrentChannel();
 }
-void Sx1280Diversity::setCurrentChannel(size_t channel) {
+void Sx1280Diversity::setChannel(size_t channel) {
   for (size_t i = 0; i < diversityLinks.size(); i++) {
-    diversityLinks[i].link->setCurrentChannel(channel);
+    diversityLinks[i].link->setChannel(channel);
   }
 }
 

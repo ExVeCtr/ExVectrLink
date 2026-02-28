@@ -6,7 +6,6 @@
 namespace VCTR::ExVectrLink::packets {
 
 enum SerialPacketType : uint8_t {
-  DataSend,   // Send the packet buffer contents.
   PacketData, // Packet data. Max 255 bytes.
 
   SetModulationPreset, // Set the modulation preset of the radio link.

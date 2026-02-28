@@ -58,7 +58,7 @@ public:
 
   size_t getNumChannels() const override;
   size_t getCurrentChannel() const override;
-  void setCurrentChannel(size_t channel) override;
+  void setChannel(size_t channel) override;
 
 private:
   void startReceiveOnAllLinks();
