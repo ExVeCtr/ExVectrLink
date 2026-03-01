@@ -44,14 +44,10 @@ void SerialTelecoms::taskInit() {
                            }
                          });
 
-  addSerialPacketHandler(SerialPacketType::Heartbeat,
-                         [this](const Core::ListArray<uint8_t> &data) {
-                           if (data.size() == 1) {
-                             auto packet = SerialPacket_Heartbeat::deserialize(
-                                 data.getPtr());
-                             isOtherEndSerialConnected = packet.isConnected;
-                           }
-                         });
+  addSerialPacketHandler<SerialPacket_Heartbeat>(
+      [this](const SerialPacket_Heartbeat &packet) {
+        isOtherEndSerialConnected = packet.isConnected;
+      });
 }
 
 void SerialTelecoms::taskCheck() {
