@@ -43,6 +43,15 @@ void SerialTelecoms::taskInit() {
                              }
                            }
                          });
+
+  addSerialPacketHandler(SerialPacketType::Heartbeat,
+                         [this](const Core::ListArray<uint8_t> &data) {
+                           if (data.size() == 1) {
+                             auto packet = SerialPacket_Heartbeat::deserialize(
+                                 data.getPtr());
+                             isOtherEndSerialConnected = packet.isConnected;
+                           }
+                         });
 }
 
 void SerialTelecoms::taskCheck() {
@@ -85,9 +94,9 @@ void SerialTelecoms::taskThread() {
     isSerialConnected = false;
   }
 
-  if (loopStart - lastPacketSendTime > 500 * Core::MILLISECONDS) {
-    lastPacketSendTime = loopStart;
-    sendSerialPacket(SerialPacketType::Heartbeat, 0);
+  if (loopStart - lastHeartbeatTime > 500 * Core::MILLISECONDS) {
+    lastHeartbeatTime = loopStart;
+    sendSerialPacket<SerialPacket_Heartbeat>({isSerialConnected});
   }
 
   lastLoopTime = loopStart;
@@ -130,6 +139,10 @@ void SerialTelecoms::sendSerialPacket(const SerialPacketType &type,
 }
 
 bool SerialTelecoms::isConnected() const { return isSerialConnected; }
+
+bool SerialTelecoms::isOtherEndConnected() const {
+  return isOtherEndSerialConnected;
+}
 
 void SerialTelecoms::forcePacketSendNow(int64_t timeout) {
   auto start = Core::NOW();
@@ -202,6 +215,7 @@ void SerialTelecoms::setPortBaudRate(uint32_t baudrate) {
 } // namespace VCTR::ExVectrLink
 
 namespace VCTR::ExVectrLink /* SerialTelecomsDatalink */ {
+
 SerialTelecomsDatalink::SerialTelecomsDatalink(SerialTelecoms &telecoms)
     : telecoms(telecoms) {
   addHandlers();

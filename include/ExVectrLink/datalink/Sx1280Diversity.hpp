@@ -70,6 +70,8 @@ private:
 
   Core::ListArray<Sx1280LinkInfo> diversityLinks;
 
+  int64_t lastPacketReceivedTime = 0;
+
   size_t currentBestLinkIndex = 0;
   uint8_t currentBestLinkLq = 0;
 

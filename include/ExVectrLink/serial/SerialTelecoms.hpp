@@ -77,7 +77,10 @@ public:
     sendSerialPacket(packet.getPacketType(), data);
   }
 
+  /// @brief If we can here the other side.
   bool isConnected() const;
+  /// @brief If the other side can hear us.
+  bool isOtherEndConnected() const;
 
   /**
    * @brief Will block and send everything currently waiting in the buffer.
@@ -102,6 +105,7 @@ private:
   int64_t lastSerialByteTime = 0;
   int64_t lastValidPacketTime = 0;
   int64_t lastPacketSendTime = 0;
+  int64_t lastHeartbeatTime = 0;
   int64_t lastLoopTime = 0;
 
   Core::ListArray<SerialPacketHandler> serialPacketHandlers;
@@ -109,6 +113,7 @@ private:
   uint32_t baudrate = standardBaudrate;
 
   bool isSerialConnected = false;
+  bool isOtherEndSerialConnected = false;
 };
 
 } // namespace VCTR::ExVectrLink

@@ -161,6 +161,22 @@ public:
   }
 };
 
+class SerialPacket_Heartbeat {
+public:
+  // If we are receiving packets from the serial port.
+  // Allows other end to see if we also seeing their connection.
+  bool isConnected;
+
+  SerialPacketType getPacketType() const { return SerialPacketType::Heartbeat; }
+  uint8_t numBytes() const { return 1; }
+  void serialize(uint8_t *buffer) const { buffer[0] = isConnected ? 1 : 0; }
+  static SerialPacket_Heartbeat deserialize(const uint8_t *buffer) {
+    SerialPacket_Heartbeat packet;
+    packet.isConnected = buffer[0] == 1;
+    return packet;
+  }
+};
+
 class SerialPacket_LinkInfo {
 public:
   int8_t rssi;

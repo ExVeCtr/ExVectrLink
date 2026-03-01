@@ -26,27 +26,11 @@ void Sx1280Diversity::addDiversityLink(
   });
   link.addReceiveHandler([this, &link, linkIndex = diversityLinks.size() - 1](
                              const VCTR::network::DataPacket &dataframe) {
-    bool othersReceiving = false;
-    for (size_t i = 0; i < diversityLinks.size(); i++) {
-      if (diversityLinks[i].link->isChannelBlocked()) {
-        othersReceiving = true;
-        break;
-      }
-    }
-    if (!receiving) {
+    auto time = Core::NOW();
+    auto timeSinceLastPacket = time - lastPacketReceivedTime;
+    if (timeSinceLastPacket > 2 * Core::MILLISECONDS) {
+      lastPacketReceivedTime = time;
       receiveHandlers_.callHandlers(dataframe);
-      currentBestLinkLq =
-          calcLinkQuality({link.lastPacketRSSI(), link.lastPacketSNR()});
-      currentBestLinkIndex = linkIndex;
-    } else if (!othersReceiving) {
-      receiving = false;
-    } else {
-      uint8_t linkLq =
-          calcLinkQuality({link.lastPacketRSSI(), link.lastPacketSNR()});
-      if (linkLq > currentBestLinkLq) {
-        currentBestLinkLq = linkLq;
-        currentBestLinkIndex = linkIndex;
-      }
     }
   });
 }
