@@ -44,10 +44,13 @@ void FHSS::taskCheck() {
   }
 }
 
-void FHSS::taskInit() {}
+void FHSS::taskInit() {
+  radioLink.addReceiveHandler([this](const network::DataPacket &packet) {
+    receiveHandlers_.callHandlers(packet);
+  });
+}
 
 void FHSS::taskThread() {
-  // Only switch channel if not currently transmitting or receiving
   if (!radioLink.isChannelBlocked() && waitingForSendFinish) {
     radioLink.transmitDataframe(packetToSend);
     waitingForSendFinish = false;

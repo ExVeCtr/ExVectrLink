@@ -23,12 +23,13 @@ void Sx1280Diversity::addDiversityLink(
   link.addTransmitFinishedHandler([this]() {
     transmitting = false;
     startReceiveOnAllLinks();
+    // LOG_MSG("Finished Transmit\n");
   });
-  link.addReceiveHandler([this, &link, linkIndex = diversityLinks.size() - 1](
-                             const VCTR::network::DataPacket &dataframe) {
+  link.addReceiveHandler([this](const VCTR::network::DataPacket &dataframe) {
     auto time = Core::NOW();
     auto timeSinceLastPacket = time - lastPacketReceivedTime;
     if (timeSinceLastPacket > 2 * Core::MILLISECONDS) {
+      LOG_MSG("Received packet\n");
       lastPacketReceivedTime = time;
       receiveHandlers_.callHandlers(dataframe);
     }
