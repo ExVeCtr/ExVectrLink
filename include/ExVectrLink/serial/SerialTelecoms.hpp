@@ -72,7 +72,8 @@ public:
 
   template <VCTR::ExVectrLink::packets::SerializablePacket T>
   void sendSerialPacket(const T &packet) {
-    Core::ListArray<uint8_t> data(packet.numBytes());
+    Core::ListArray<uint8_t> data;
+    data.setSize(packet.numBytes());
     packet.serialize(data.getPtr());
     sendSerialPacket(packet.getPacketType(), data);
   }
