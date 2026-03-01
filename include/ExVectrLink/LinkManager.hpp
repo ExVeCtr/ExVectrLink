@@ -5,6 +5,8 @@
 
 #include "ExVectrCore/task_types.hpp"
 
+#include "ExVectrNetwork/datalink/DatalinkI.hpp"
+
 #include "ExVectrLink/ExVectrLinkI.hpp"
 
 namespace VCTR::ExVectrLink /* ExVectrLinkI */ {
@@ -32,6 +34,7 @@ public:
   void enableFhss(bool enable);
 
   void setMaxTxPower(uint8_t maxDBm);
+  uint8_t getCurrentTxPower() const;
 
   bool isFailsafe() const;
 
@@ -47,17 +50,19 @@ public:
   void setMak(uint8_t mak);
 
 private:
-  // Extension hooks for higher-level link policies.
-  // Intentionally simple stubs in the cpp for later expansion.
+  void receivePacket(const VCTR::network::DataPacket &packet);
   void updateFailsafeState();
   void updateDynamicPowerManagement();
   void updateBindingState();
+  void updateLinkQualityMetrics();
 
   VCTR::ExVectrLink::ExVectrLinkI &link;
   uint8_t mak;
 
   uint8_t maxTxPowerDBm = 20;
-  uint8_t currentTxPowerDBm = 20;
+  uint8_t currentTxPowerDBm = 12;
+
+  int64_t lastPowerChangeTime = 0;
 
   uint32_t fhssSequenceKey = 0;
 
@@ -65,7 +70,9 @@ private:
   bool bindingInProgress = false;
   bool failsafe = false;
 
-  int64_t lastHealthyLinkTime = 0;
+  uint8_t linkQuality = 0;
+
+  int64_t lastPacketTime = 0;
 };
 
 } // namespace VCTR::ExVectrLink

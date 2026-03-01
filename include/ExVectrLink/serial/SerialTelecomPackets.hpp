@@ -182,19 +182,21 @@ public:
   int8_t rssi;
   int8_t snr;
   uint8_t antenna; // Current antenna in use.
+  int8_t txPower;
 
   uint8_t lossRate; // percentage of packets lost. 0 good, 100 all.
 
   bool dualLinkMode;
 
   SerialPacketType getPacketType() const { return SerialPacketType::LinkInfo; }
-  uint8_t numBytes() const { return 5; }
+  uint8_t numBytes() const { return 6; }
   void serialize(uint8_t *buffer) const {
     buffer[0] = rssi;
     buffer[1] = snr;
     buffer[2] = antenna;
     buffer[3] = lossRate;
     buffer[4] = dualLinkMode ? 1 : 0;
+    buffer[5] = txPower;
   }
   static SerialPacket_LinkInfo deserialize(const uint8_t *buffer) {
     SerialPacket_LinkInfo info;
@@ -203,6 +205,7 @@ public:
     info.antenna = buffer[2];
     info.lossRate = buffer[3];
     info.dualLinkMode = buffer[4] == 1;
+    info.txPower = buffer[5];
     return info;
   }
 };

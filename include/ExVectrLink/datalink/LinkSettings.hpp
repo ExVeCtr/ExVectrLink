@@ -41,7 +41,8 @@ struct LinkInfo {
   int8_t snr;
   uint8_t antenna; // Current antenna in use.
 
-  uint8_t lossRate; // percentage of packets lost. 0 good, 100 all.
+  // percentage of last 100 packets that were lost.
+  uint8_t lossRate;
 
   bool dualLinkMode;
 };

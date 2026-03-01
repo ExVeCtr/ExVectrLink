@@ -1,3 +1,5 @@
+#include <cstring>
+
 #include "ExVectrCore/task_types.hpp"
 #include "ExVectrCore/time_definitions.hpp"
 
@@ -7,7 +9,7 @@ namespace VCTR::ExVectrLink {
 
 namespace {
 
-constexpr uint8_t MinTxPowerDBm = 2;
+constexpr uint8_t MinTxPowerDBm = 12;
 constexpr uint8_t MaxTxPowerDBm = 33;
 
 uint8_t clampTxPower(uint8_t txPowerDBm) {
@@ -21,8 +23,6 @@ uint8_t clampTxPower(uint8_t txPowerDBm) {
 }
 
 uint32_t makeFhssSequenceKey(uint8_t mak) {
-  // Lightweight deterministic key seeding. Replace with stronger randomness
-  // or pairing state as required.
   uint32_t seed = 0xA5F01234u;
   seed ^= static_cast<uint32_t>(mak) << 24;
   seed ^= static_cast<uint32_t>(Core::NOW());
@@ -39,31 +39,22 @@ LinkManager::LinkManager(VCTR::ExVectrLink::ExVectrLinkI &link, uint8_t mak)
   setMaxTxPower(maxTxPowerDBm);
 
   fhssSequenceKey = makeFhssSequenceKey(mak);
-  lastHealthyLinkTime = Core::NOW();
 
   Core::getSystemScheduler().addTask(*this);
 }
 
 void LinkManager::taskInit() {
-  failsafe = false;
+  failsafe = true;
   bindingInProgress = false;
-  lastHealthyLinkTime = Core::NOW();
+
+  link.addReceiveHandler([this](const VCTR::network::DataPacket &packet) {
+    receivePacket(packet);
+  });
 }
 
-void LinkManager::taskCheck() {
-  // Keep this task light. Run immediately if in a transient link state.
-  if (bindingInProgress || failsafe || getLinkQuality() < 80) {
-    setDeadline(Core::NOW());
-  }
-}
+void LinkManager::taskCheck() {}
 
 void LinkManager::taskThread() {
-  const auto &info = link.getLinkInfo();
-
-  if (info.lossRate < 100) {
-    lastHealthyLinkTime = Core::NOW();
-  }
-
   updateFailsafeState();
   updateDynamicPowerManagement();
   updateBindingState();
@@ -83,25 +74,15 @@ void LinkManager::setMaxTxPower(uint8_t maxDBm) {
   }
 }
 
+uint8_t LinkManager::getCurrentTxPower() const { return currentTxPowerDBm; }
+
 bool LinkManager::isFailsafe() const { return failsafe; }
 
-uint8_t LinkManager::getLinkQuality() const {
-  const auto &info = link.getLinkInfo();
-  if (info.lossRate >= 100) {
-    return 0;
-  }
-  return static_cast<uint8_t>(100 - info.lossRate);
-}
+uint8_t LinkManager::getLinkQuality() const { return linkQuality; }
 
-uint8_t LinkManager::getLinkRSSI() const {
-  const auto rssi = link.getLinkInfo().rssi;
-  return rssi < 0 ? 0 : static_cast<uint8_t>(rssi);
-}
+uint8_t LinkManager::getLinkRSSI() const { return link.getLinkInfo().rssi; }
 
-uint8_t LinkManager::getLinkSNR() const {
-  const auto snr = link.getLinkInfo().snr;
-  return snr < 0 ? 0 : static_cast<uint8_t>(snr);
-}
+uint8_t LinkManager::getLinkSNR() const { return link.getLinkInfo().snr; }
 
 uint8_t LinkManager::getLinkAntenna() const {
   return link.getLinkInfo().antenna;
@@ -110,14 +91,8 @@ uint8_t LinkManager::getLinkAntenna() const {
 void LinkManager::startBinding() {
   bindingInProgress = true;
 
-  // Generate a fresh sequence key and re-apply FHSS state to aid pairing.
-  fhssSequenceKey = makeFhssSequenceKey(mak);
-  link.setMediaAccessKey(mak);
-
-  if (fhssEnabled) {
-    link.setEnableFhss(false, 0);
-    link.setEnableFhss(true, fhssSequenceKey);
-  }
+  link.setEnableFhss(false);
+  link.setLinkChannel(0);
 }
 
 uint32_t LinkManager::getFhssSequenceKey() const { return fhssSequenceKey; }
@@ -127,26 +102,38 @@ void LinkManager::setMak(uint8_t mak) {
   link.setMediaAccessKey(mak);
 }
 
+void LinkManager::receivePacket(const VCTR::network::DataPacket &packet) {
+  lastPacketTime = Core::NOW();
+  updateLinkQualityMetrics();
+  if (Core::NOW() - lastPowerChangeTime > 100 * Core::MILLISECONDS) {
+    lastPowerChangeTime = Core::NOW();
+
+    bool updatePower = false;
+    if (linkQuality < 90) {
+      currentTxPowerDBm++;
+      updatePower = true;
+    } else if (linkQuality > 99) {
+      currentTxPowerDBm--;
+      updatePower = true;
+    }
+    if (updatePower) {
+      currentTxPowerDBm = clampTxPower(currentTxPowerDBm);
+      link.setTxPower(currentTxPowerDBm);
+    }
+  }
+}
+
 void LinkManager::updateFailsafeState() {
-  constexpr int64_t failsafeTimeout = 750 * Core::MILLISECONDS;
-  failsafe = (Core::NOW() - lastHealthyLinkTime) > failsafeTimeout;
+  constexpr int64_t failsafeTimeout = 500 * Core::MILLISECONDS;
+  failsafe = (Core::NOW() - lastPacketTime) > failsafeTimeout;
 }
 
-void LinkManager::updateDynamicPowerManagement() {
-  // TODO: implement adaptive TX power logic using RSSI/SNR/loss metrics.
-  // Current placeholder keeps TX power pinned to the configured cap.
-  if (currentTxPowerDBm != maxTxPowerDBm) {
-    currentTxPowerDBm = maxTxPowerDBm;
-    link.setTxPower(currentTxPowerDBm);
-  }
-}
+void LinkManager::updateDynamicPowerManagement() {}
 
-void LinkManager::updateBindingState() {
-  // TODO: implement full bind state machine (timeouts, retries, confirmation).
-  // Placeholder exits binding once link quality is reasonable.
-  if (bindingInProgress && getLinkQuality() >= 60) {
-    bindingInProgress = false;
-  }
+void LinkManager::updateBindingState() {}
+
+void LinkManager::updateLinkQualityMetrics() {
+  linkQuality = 100 - link.getLinkInfo().lossRate;
 }
 
 } // namespace VCTR::ExVectrLink
