@@ -217,9 +217,7 @@ void SerialTelecoms::setPortBaudRate(uint32_t baudrate) {
 namespace VCTR::ExVectrLink /* SerialTelecomsDatalink */ {
 
 SerialTelecomsDatalink::SerialTelecomsDatalink(SerialTelecoms &telecoms)
-    : telecoms(telecoms) {
-  addHandlers();
-}
+    : telecoms(telecoms) {}
 
 bool SerialTelecomsDatalink::transmitDataframe(
     const VCTR::network::DataPacket &dataframe) {
@@ -243,6 +241,13 @@ size_t SerialTelecomsDatalink::getMaxPacketSize() const { return 250; }
  * dataframes.
  */
 bool SerialTelecomsDatalink::isChannelBlocked() const { return false; }
+
+void SerialTelecomsDatalink::initialize() {
+  if (!initialized_) {
+    addHandlers();
+    initialized_ = true;
+  }
+}
 
 void SerialTelecomsDatalink::addHandlers() {
   telecoms.addSerialPacketHandler(SerialPacketType::PacketData,

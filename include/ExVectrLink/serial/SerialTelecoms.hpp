@@ -141,6 +141,8 @@ public:
    */
   bool isChannelBlocked() const override;
 
+  void initialize();
+
   // --------------- ExVectrLinkI implementation ---------------
 
   void setTxPower(uint8_t txPower) override;
@@ -159,6 +161,8 @@ public:
 
 private:
   void addHandlers();
+
+  bool initialized_ = false;
 
   SerialTelecoms &telecoms;
 
