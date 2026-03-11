@@ -25,16 +25,7 @@ enum SerialPacketType : uint8_t {
   InitLink, // Send to startup the link and also set the Media access key (MAK).
 };
 
-template <typename T>
-concept SerializablePacket =
-    requires(const T a, uint8_t *buffer, const uint8_t *readBuffer) {
-      { a.getPacketType() } -> std::same_as<SerialPacketType>;
-      { a.numBytes() } -> std::convertible_to<uint8_t>;
-      { a.serialize(buffer) } -> std::same_as<void>;
-      { T::deserialize(readBuffer) } -> std::same_as<T>;
-    };
-
-}; // namespace VCTR::ExVectrLink::packets
+}
 
 namespace VCTR::ExVectrLink::packets {
 
@@ -56,7 +47,7 @@ public:
 
 class SerialPacket_SetTxPower {
 public:
-  uint8_t txPower; // Tx power in dBm. 0-20.
+  uint8_t txPower; // Tx power in dBm.
 
   SerialPacketType getPacketType() const {
     return SerialPacketType::SetTxPower;
