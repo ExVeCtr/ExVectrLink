@@ -22,7 +22,7 @@ struct ModulationParams {
   int64_t hopInterval; // Time the radio stays on each channel
 };
 
-const ModulationParams modulationPresets[ModulationPresets::MAX];
+extern const ModulationParams modulationPresets[ModulationPresets::MAX];
 
 struct LinkInfo {
   int8_t rssi;
