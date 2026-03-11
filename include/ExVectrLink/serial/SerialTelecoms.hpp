@@ -6,6 +6,7 @@
 
 #include "ExVectrHAL/digital_io.hpp"
 
+#include "ExVectrCore/CanSerialize.hpp"
 #include "ExVectrCore/list_array.hpp"
 #include "ExVectrCore/task_types.hpp"
 
@@ -55,7 +56,7 @@ public:
       const VCTR::ExVectrLink::packets::SerialPacketType &type,
       std::function<void(const Core::ListArray<uint8_t> &data)> handler);
 
-  template <VCTR::ExVectrLink::packets::SerializablePacket T>
+  template <VCTR::ExVectrLink::packets::IsSerialPacket T>
   void addSerialPacketHandler(std::function<void(const T &packet)> handler) {
     addSerialPacketHandler(T().getPacketType(),
                            [handler](const Core::ListArray<uint8_t> &data) {
@@ -70,7 +71,7 @@ public:
   sendSerialPacket(const VCTR::ExVectrLink::packets::SerialPacketType &type,
                    const Core::ListArray<uint8_t> &data = {});
 
-  template <VCTR::ExVectrLink::packets::SerializablePacket T>
+  template <VCTR::ExVectrLink::packets::IsSerialPacket T>
   void sendSerialPacket(const T &packet) {
     Core::ListArray<uint8_t> data;
     data.setSize(packet.numBytes());

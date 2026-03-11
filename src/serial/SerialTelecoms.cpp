@@ -1,3 +1,4 @@
+#include <cstring>
 #include <functional>
 
 #include "ExVectrHAL/digital_io.hpp"
@@ -248,8 +249,7 @@ void SerialTelecomsDatalink::initialize() {
 void SerialTelecomsDatalink::addHandlers() {
   telecoms.addSerialPacketHandler(SerialPacketType::PacketData,
                                   [this](const Core::ListArray<uint8_t> &data) {
-                                    network::DataPacket packet(data);
-                                    receiveHandlers_.callHandlers(packet);
+                                    receiveHandlers_.callHandlers(data);
                                   });
   telecoms.addSerialPacketHandler<SerialPacket_LinkInfo>(
       [this](const SerialPacket_LinkInfo &packet) {

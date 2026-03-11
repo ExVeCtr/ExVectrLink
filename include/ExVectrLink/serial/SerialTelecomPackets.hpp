@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "ExVectrCore/CanSerialize.hpp"
+
 namespace VCTR::ExVectrLink::packets {
 
 enum SerialPacketType : uint8_t {
@@ -25,7 +27,12 @@ enum SerialPacketType : uint8_t {
   InitLink, // Send to startup the link and also set the Media access key (MAK).
 };
 
-}
+template <typename T>
+concept IsSerialPacket = VCTR::Core::CanSerialize<T> && requires(const T a) {
+  { a.getPacketType() } -> std::same_as<SerialPacketType>;
+};
+
+} // namespace VCTR::ExVectrLink::packets
 
 namespace VCTR::ExVectrLink::packets {
 
@@ -134,6 +141,44 @@ public:
     SerialPacket_SetBaudRate packet;
     packet.baudRate =
         buffer[0] | (buffer[1] << 8) | (buffer[2] << 16) | (buffer[3] << 24);
+    return packet;
+  }
+};
+
+class SerialPacket_UpdateMode {
+public:
+  // If true, then all other nodes will be placed into update mode,
+  // Otherwise, only this node.
+  bool forward;
+  // How long to stay in update mode.
+  int64_t duration;
+
+  SerialPacketType getPacketType() const {
+    return SerialPacketType::UpdateMode;
+  }
+  uint8_t numBytes() const { return 9; }
+  void serialize(uint8_t *buffer) const {
+    buffer[0] = forward ? 1 : 0;
+    buffer[1] = duration & 0xFF;
+    buffer[2] = (duration >> 8) & 0xFF;
+    buffer[3] = (duration >> 16) & 0xFF;
+    buffer[4] = (duration >> 24) & 0xFF;
+    buffer[5] = (duration >> 32) & 0xFF;
+    buffer[6] = (duration >> 40) & 0xFF;
+    buffer[7] = (duration >> 48) & 0xFF;
+    buffer[8] = (duration >> 56) & 0xFF;
+  }
+  static SerialPacket_UpdateMode deserialize(const uint8_t *buffer) {
+    SerialPacket_UpdateMode packet;
+    packet.forward = buffer[0] == 1;
+    packet.duration = static_cast<int64_t>(buffer[1]) |
+                      (static_cast<int64_t>(buffer[2]) << 8) |
+                      (static_cast<int64_t>(buffer[3]) << 16) |
+                      (static_cast<int64_t>(buffer[4]) << 24) |
+                      (static_cast<int64_t>(buffer[5]) << 32) |
+                      (static_cast<int64_t>(buffer[6]) << 40) |
+                      (static_cast<int64_t>(buffer[7]) << 48) |
+                      (static_cast<int64_t>(buffer[8]) << 56);
     return packet;
   }
 };
