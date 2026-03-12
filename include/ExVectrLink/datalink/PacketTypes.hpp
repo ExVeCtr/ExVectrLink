@@ -1,0 +1,16 @@
+#ifndef EXVECTRLINK_PACKETTYPES_HPP
+#define EXVECTRLINK_PACKETTYPES_HPP
+
+#include <cstdint>
+
+#include "ExVectrNetwork/datalink/sx1280/Sx1280.hpp"
+
+namespace VCTR::ExVectrLink::datalink {
+
+enum PacketTypes : uint8_t {
+  Data,
+};
+
+} // namespace VCTR::ExVectrLink::datalink
+
+#endif // EXVECTRLINK_PACKETTYPES_HPP
