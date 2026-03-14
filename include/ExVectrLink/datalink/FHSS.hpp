@@ -10,6 +10,11 @@
 
 namespace VCTR::ExVectrLink::datalink {
 
+enum class FHSSState : uint8_t {
+  Searching,
+  Synced,
+};
+
 /**
  * The FHSS class takes care of switching channels for a given datalink.
  * This does not limit the max packet size. Switching is only done once a packet
@@ -24,6 +29,11 @@ public:
   uint8_t getFhssKey() const;
 
   void enableFhss(bool enable);
+
+  FHSSState getFhssState() const;
+
+  void addChannelBlockedChangeHandler(
+      VCTR::Core::HandlerGroup<bool, uint8_t>::HandlerFunction handler);
 
   //--- DatalinkI interface implementation ---
 
@@ -50,8 +60,11 @@ public:
 
 private:
   void generateSequence();
+  void sendFHSSPacket();
 
   VCTR::network::datalink::RadioI &radioLink;
+
+  VCTR::Core::HandlerGroup<bool, uint8_t> channelBlockedChangeHandlers;
 
   VCTR::Core::ListArray<uint8_t> channelSequence;
   uint8_t key = 0;
@@ -60,6 +73,11 @@ private:
   bool waitingForSendFinish = false;
 
   bool fhssEnabled = false;
+
+  int64_t lastFHSSPacketSentTime = 0;
+  int64_t lastPacketReceivedTime = 0;
+
+  FHSSState fhssState = FHSSState::Searching;
 };
 
 } // namespace VCTR::ExVectrLink::datalink

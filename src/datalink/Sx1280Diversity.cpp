@@ -19,21 +19,33 @@ Sx1280Diversity::Sx1280Diversity(
 
 void Sx1280Diversity::addDiversityLink(
     VCTR::network::datalink::Datalink_SX1280 &link) {
+  auto linkIndex = diversityLinks.size();
   diversityLinks.append({&link, {0, 0}});
   link.addTransmitFinishedHandler([this]() {
     transmitting = false;
     startReceiveOnAllLinks();
-    // LOG_MSG("Finished Transmit\n");
   });
-  link.addReceiveHandler([this](const VCTR::network::DataPacket &dataframe) {
-    auto time = Core::NOW();
-    auto timeSinceLastPacket = time - lastPacketReceivedTime;
-    if (timeSinceLastPacket > 2 * Core::MILLISECONDS) {
-      LOG_MSG("Received packet\n");
-      lastPacketReceivedTime = time;
-      receiveHandlers_.callHandlers(dataframe);
-    }
-  });
+  link.addReceiveHandler(
+      [this, linkIndex](const VCTR::network::DataPacket &dataframe) {
+        auto time = Core::NOW();
+
+        auto data = dataframe;
+        auto dataId = data.payload[data.payload.size() - 1];
+        data.payload.pop();
+
+        auto &linkInfo = diversityLinks[linkIndex];
+        linkInfo.lastPacketInfo.rssi = linkInfo.link->lastPacketRSSI();
+        linkInfo.lastPacketInfo.snr = linkInfo.link->lastPacketSNR();
+        linkInfo.lastPacketInfo.receivedIds.placeBack(dataId, true);
+
+        uint8_t idDiff = uint8_t(dataId - lastReceivedPacketId);
+        if (idDiff > 0 && idDiff < 128) {
+          receiveHandlers_.callHandlers(data);
+        }
+
+        lastReceivedPacketId = dataId;
+        determineBestLink();
+      });
 }
 
 const VCTR::network::datalink::Datalink_SX1280 *
@@ -53,11 +65,15 @@ bool Sx1280Diversity::transmitDataframe(
     return false;
   }
 
+  auto data = dataframe;
+  lastReceivedPacketId++;
+  data.payload.append(lastReceivedPacketId);
+
   auto &bestLink = diversityLinks[currentBestLinkIndex];
   stopReceiveOnAllLinks();
   bestLink.link->enableTxRx(true);
   transmitting = true;
-  return bestLink.link->transmitDataframe(dataframe);
+  return bestLink.link->transmitDataframe(data);
 }
 
 /**
@@ -115,9 +131,44 @@ void Sx1280Diversity::stopReceiveOnAllLinks() {
   }
 }
 
-uint8_t
-Sx1280Diversity::calcLinkQuality(const Sx1280PacketRfInfo &linkInfo) const {
-  return linkInfo.snr;
+void Sx1280Diversity::determineBestLink() {
+  size_t bestLinkIndex = currentBestLinkIndex;
+  size_t bestLostPackets = (size_t)-1;
+
+  for (size_t i = 0; i < diversityLinks.size(); i++) {
+    const auto &linkInfo = diversityLinks[i];
+    const auto &ids = linkInfo.lastPacketInfo.receivedIds;
+
+    if (ids.size() == 0) {
+      // No packets received on this link yet; skip
+      continue;
+    }
+
+    if (ids.size() == 1) {
+      // Only one sample; cannot estimate loss, assume none
+      if (bestLostPackets > 0) {
+        bestLostPackets = 0;
+        bestLinkIndex = i;
+      }
+      continue;
+    }
+
+    uint8_t firstId = ids[0];
+    uint8_t lastId = ids[ids.size() - 1];
+    size_t expectedPackets =
+        static_cast<size_t>(static_cast<uint8_t>(lastId - firstId)) + 1u;
+    size_t receivedPackets = ids.size();
+    size_t lostPackets = (expectedPackets > receivedPackets)
+                             ? (expectedPackets - receivedPackets)
+                             : 0u;
+
+    if (lostPackets < bestLostPackets) {
+      bestLostPackets = lostPackets;
+      bestLinkIndex = i;
+    }
+  }
+
+  currentBestLinkIndex = bestLinkIndex;
 }
 
 } // namespace VCTR::ExVectrLink::datalink

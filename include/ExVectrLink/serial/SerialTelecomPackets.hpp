@@ -8,7 +8,9 @@
 namespace VCTR::ExVectrLink::packets {
 
 enum SerialPacketType : uint8_t {
-  PacketData, // Packet data. Max 255 bytes.
+  PacketData,     // Packet data. Max 255 bytes.
+  ChannelFree,    // Contains the max number of bytes that can be sent.
+  ChannelBlocked, // Sent when the channel is blocked and cannot send data.
 
   SetModulationPreset, // Set the modulation preset of the radio link.
   SetTxPower,          // Set the Tx power of the radio link. 0-20 dBm.
@@ -35,6 +37,35 @@ concept IsSerialPacket = VCTR::Core::CanSerialize<T> && requires(const T a) {
 } // namespace VCTR::ExVectrLink::packets
 
 namespace VCTR::ExVectrLink::packets {
+
+class SerialPacket_ChannelFree {
+public:
+  uint8_t maxBytes;
+
+  SerialPacketType getPacketType() const {
+    return SerialPacketType::ChannelFree;
+  }
+  uint8_t numBytes() const { return 1; }
+  void serialize(uint8_t *buffer) const { buffer[0] = maxBytes; }
+  static SerialPacket_ChannelFree deserialize(const uint8_t *buffer) {
+    SerialPacket_ChannelFree packet;
+    packet.maxBytes = buffer[0];
+    return packet;
+  }
+};
+
+class SerialPacket_ChannelBlocked {
+public:
+  SerialPacketType getPacketType() const {
+    return SerialPacketType::ChannelBlocked;
+  }
+  uint8_t numBytes() const { return 0; }
+  void serialize(uint8_t *buffer) const {}
+  static SerialPacket_ChannelBlocked deserialize(const uint8_t *buffer) {
+    SerialPacket_ChannelBlocked packet;
+    return packet;
+  }
+};
 
 class SerialPacket_SetModulationPreset {
 public:

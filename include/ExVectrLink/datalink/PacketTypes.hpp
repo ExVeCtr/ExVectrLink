@@ -9,6 +9,7 @@ namespace VCTR::ExVectrLink::datalink {
 
 enum PacketTypes : uint8_t {
   Data,
+  Heartbeat,
 };
 
 } // namespace VCTR::ExVectrLink::datalink

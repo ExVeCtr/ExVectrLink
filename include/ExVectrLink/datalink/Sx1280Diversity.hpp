@@ -16,15 +16,11 @@ private:
   struct Sx1280PacketRfInfo {
     int16_t rssi;
     int16_t snr;
+    Core::ListBuffer<uint8_t, 5> receivedIds;
   };
   struct Sx1280LinkInfo {
     VCTR::network::datalink::Datalink_SX1280 *link;
     Sx1280PacketRfInfo lastPacketInfo;
-  };
-  struct ReceivedDataframeInfo {
-    VCTR::network::DataPacket dataframe;
-    size_t linkIndex;
-    Sx1280PacketRfInfo rfInfo;
   };
 
 public:
@@ -64,9 +60,7 @@ private:
   void startReceiveOnAllLinks();
   void stopReceiveOnAllLinks();
 
-  void handleReceivedDataframes();
-
-  uint8_t calcLinkQuality(const Sx1280PacketRfInfo &linkInfo) const;
+  void determineBestLink();
 
   Core::ListArray<Sx1280LinkInfo> diversityLinks;
 
@@ -74,6 +68,8 @@ private:
 
   size_t currentBestLinkIndex = 0;
   uint8_t currentBestLinkLq = 0;
+
+  uint8_t lastReceivedPacketId = 0;
 
   bool transmitting = false;
   bool receiving = false;
