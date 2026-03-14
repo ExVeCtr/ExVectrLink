@@ -103,16 +103,18 @@ void FHSS::taskInit() {
 }
 
 void FHSS::taskThread() {
-  if (!radioLink.isChannelBlocked() && waitingForSendFinish) {
-    radioLink.transmitDataframe(packetToSend);
-  } else if (Core::NOW() - lastFHSSPacketSentTime > 500 * Core::MILLISECONDS) {
-    sendFHSSPacket();
-    lastFHSSPacketSentTime = Core::NOW();
-  }
-
-  if (waitingForSendFinish && !radioLink.isChannelBlocked()) {
-    waitingForSendFinish = false;
-    channelBlockedChangeHandlers.callHandlers(false, 10);
+  if (!radioLink.isChannelBlocked()) {
+    if (packetToSend.payload.size() > 0) {
+      radioLink.transmitDataframe(packetToSend);
+      packetToSend.payload.clear();
+    } else if (Core::NOW() - lastFHSSPacketSentTime >
+               500 * Core::MILLISECONDS) {
+      sendFHSSPacket();
+      lastFHSSPacketSentTime = Core::NOW();
+    } else if (waitingForSendFinish) {
+      waitingForSendFinish = false;
+      channelBlockedChangeHandlers.callHandlers(false, 10);
+    }
   }
 
   if (Core::NOW() - lastPacketReceivedTime > 200 * Core::MILLISECONDS) {

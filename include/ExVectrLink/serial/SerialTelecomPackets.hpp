@@ -8,6 +8,8 @@
 namespace VCTR::ExVectrLink::packets {
 
 enum SerialPacketType : uint8_t {
+  Ack, // Ack for received packet.
+
   PacketData,   // Packet data. Max 255 bytes.
   ChannelState, // If channel is blocked and max packet size
 
@@ -36,6 +38,20 @@ concept IsSerialPacket = VCTR::Core::CanSerialize<T> && requires(const T a) {
 } // namespace VCTR::ExVectrLink::packets
 
 namespace VCTR::ExVectrLink::packets {
+
+class SerialPacket_Ack {
+public:
+  bool success;
+
+  SerialPacketType getPacketType() const { return SerialPacketType::Ack; }
+  uint8_t numBytes() const { return 1; }
+  void serialize(uint8_t *buffer) const { buffer[0] = success ? 1 : 0; }
+  static SerialPacket_Ack deserialize(const uint8_t *buffer) {
+    SerialPacket_Ack packet;
+    packet.success = buffer[0] == 1;
+    return packet;
+  }
+};
 
 class SerialPacket_ChannelState {
 public:

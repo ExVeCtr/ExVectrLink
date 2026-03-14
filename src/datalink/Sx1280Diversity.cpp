@@ -95,11 +95,15 @@ size_t Sx1280Diversity::getMaxPacketSize() const {
  * dataframes.
  */
 bool Sx1280Diversity::isChannelBlocked() const {
-  bool blocked = transmitting;
-  for (size_t i = 0; i < diversityLinks.size() && !blocked; i++) {
-    blocked = blocked || diversityLinks[i].link->isChannelBlocked();
+  if (transmitting) {
+    return true;
   }
-  return blocked;
+  for (size_t i = 0; i < diversityLinks.size(); i++) {
+    if (diversityLinks[i].link->isChannelBlocked()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 size_t Sx1280Diversity::getNumChannels() const {
