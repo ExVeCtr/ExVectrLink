@@ -70,7 +70,8 @@ bool FHSS::transmitDataframe(const VCTR::network::DataPacket &dataframe) {
   }
   packetToSend = dataframe;
   packetToSend.payload.append((uint8_t)FHSSPacketType::Data);
-  // waitingForSendFinish = true;
+  channelBlockedChangeHandlers.callHandlers(true, 0);
+  waitingForSendFinish = true;
   return true;
 }
 
@@ -81,7 +82,7 @@ bool FHSS::isChannelBlocked() const {
 }
 
 void FHSS::taskCheck() {
-  if (waitingForSendFinish && !radioLink.isChannelBlocked()) {
+  if (waitingForSendFinish) {
     setDeadline(Core::NOW());
   }
 }
@@ -104,10 +105,14 @@ void FHSS::taskInit() {
 void FHSS::taskThread() {
   if (!radioLink.isChannelBlocked() && waitingForSendFinish) {
     radioLink.transmitDataframe(packetToSend);
-    waitingForSendFinish = false;
   } else if (Core::NOW() - lastFHSSPacketSentTime > 500 * Core::MILLISECONDS) {
     sendFHSSPacket();
     lastFHSSPacketSentTime = Core::NOW();
+  }
+
+  if (waitingForSendFinish && !radioLink.isChannelBlocked()) {
+    waitingForSendFinish = false;
+    channelBlockedChangeHandlers.callHandlers(false, 10);
   }
 
   if (Core::NOW() - lastPacketReceivedTime > 200 * Core::MILLISECONDS) {

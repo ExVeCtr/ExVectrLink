@@ -8,9 +8,8 @@
 namespace VCTR::ExVectrLink::packets {
 
 enum SerialPacketType : uint8_t {
-  PacketData,     // Packet data. Max 255 bytes.
-  ChannelFree,    // Contains the max number of bytes that can be sent.
-  ChannelBlocked, // Sent when the channel is blocked and cannot send data.
+  PacketData,   // Packet data. Max 255 bytes.
+  ChannelState, // If channel is blocked and max packet size
 
   SetModulationPreset, // Set the modulation preset of the radio link.
   SetTxPower,          // Set the Tx power of the radio link. 0-20 dBm.
@@ -38,31 +37,23 @@ concept IsSerialPacket = VCTR::Core::CanSerialize<T> && requires(const T a) {
 
 namespace VCTR::ExVectrLink::packets {
 
-class SerialPacket_ChannelFree {
+class SerialPacket_ChannelState {
 public:
   uint8_t maxBytes;
+  bool blocked;
 
   SerialPacketType getPacketType() const {
-    return SerialPacketType::ChannelFree;
+    return SerialPacketType::ChannelState;
   }
-  uint8_t numBytes() const { return 1; }
-  void serialize(uint8_t *buffer) const { buffer[0] = maxBytes; }
-  static SerialPacket_ChannelFree deserialize(const uint8_t *buffer) {
-    SerialPacket_ChannelFree packet;
+  uint8_t numBytes() const { return 2; }
+  void serialize(uint8_t *buffer) const {
+    buffer[0] = maxBytes;
+    buffer[1] = blocked ? 1 : 0;
+  }
+  static SerialPacket_ChannelState deserialize(const uint8_t *buffer) {
+    SerialPacket_ChannelState packet;
     packet.maxBytes = buffer[0];
-    return packet;
-  }
-};
-
-class SerialPacket_ChannelBlocked {
-public:
-  SerialPacketType getPacketType() const {
-    return SerialPacketType::ChannelBlocked;
-  }
-  uint8_t numBytes() const { return 0; }
-  void serialize(uint8_t *buffer) const {}
-  static SerialPacket_ChannelBlocked deserialize(const uint8_t *buffer) {
-    SerialPacket_ChannelBlocked packet;
+    packet.blocked = buffer[1] == 1;
     return packet;
   }
 };

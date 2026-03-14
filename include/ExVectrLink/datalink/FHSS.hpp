@@ -32,6 +32,7 @@ public:
 
   FHSSState getFhssState() const;
 
+  // Bool is channel blocked status and uint8_t is the max number of bytes.
   void addChannelBlockedChangeHandler(
       VCTR::Core::HandlerGroup<bool, uint8_t>::HandlerFunction handler);
 
