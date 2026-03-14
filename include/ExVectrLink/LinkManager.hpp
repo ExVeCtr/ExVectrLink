@@ -15,7 +15,8 @@ namespace VCTR::ExVectrLink /* ExVectrLinkI */ {
  * @brief The Link Manager is responsible for managing the high level features
  * such as binding, Power management, failsafe detection and recovery.
  */
-class LinkManager : public Core::Task_Periodic {
+class LinkManager : public Core::Task_Periodic,
+                    public network::datalink::DatalinkI {
 public:
   /**
    * @brief Construct a new Link Manager object.
@@ -49,6 +50,13 @@ public:
 
   void setMak(uint8_t mak);
 
+  // End to end trasnmission. Sending here will also be received by LinkManager
+  bool transmitDataframe(const VCTR::network::DataPacket &dataframe) override;
+
+  size_t getMaxPacketSize() const override;
+
+  bool isChannelBlocked() const override;
+
 private:
   void receivePacket(const VCTR::network::DataPacket &packet);
   void updateFailsafeState();
@@ -73,6 +81,7 @@ private:
   uint8_t linkQuality = 0;
 
   int64_t lastPacketTime = 0;
+  int64_t failsafeTimeout = 500 * Core::MILLISECONDS;
 };
 
 } // namespace VCTR::ExVectrLink

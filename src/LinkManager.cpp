@@ -3,6 +3,8 @@
 #include "ExVectrCore/task_types.hpp"
 #include "ExVectrCore/time_definitions.hpp"
 
+#include "ExVectrLink/datalink/PacketTypes.hpp"
+
 #include "ExVectrLink/LinkManager.hpp"
 
 namespace VCTR::ExVectrLink {
@@ -102,11 +104,34 @@ void LinkManager::setMak(uint8_t mak) {
   link.setMediaAccessKey(mak);
 }
 
+bool LinkManager::transmitDataframe(
+    const VCTR::network::DataPacket &dataframe) {
+
+  VCTR::network::DataPacket dataPacket;
+  dataPacket.payload = dataframe.payload;
+  dataPacket.payload.append(VCTR::ExVectrLink::datalink::PacketTypes::Data);
+  return link.transmitDataframe(dataPacket);
+}
+
+size_t LinkManager::getMaxPacketSize() const { return link.getMaxPacketSize(); }
+
+bool LinkManager::isChannelBlocked() const { return link.isChannelBlocked(); }
+
 void LinkManager::receivePacket(const VCTR::network::DataPacket &packet) {
-  lastPacketTime = Core::NOW();
+  int64_t receiveTime = Core::NOW();
+
+  auto packetType = packet.payload[packet.payload.size() - 1];
+  if (packetType == VCTR::ExVectrLink::datalink::PacketTypes::Data) {
+    VCTR::network::DataPacket dataPacket;
+    dataPacket.payload.setSize(packet.payload.size() - 1);
+    std::memcpy(dataPacket.payload.getPtr(), packet.payload.getPtr(),
+                packet.payload.size() - 1);
+    receiveHandlers_.callHandlers(dataPacket);
+  }
+
   updateLinkQualityMetrics();
-  if (Core::NOW() - lastPowerChangeTime > 100 * Core::MILLISECONDS) {
-    lastPowerChangeTime = Core::NOW();
+  if (receiveTime - lastPowerChangeTime > 100 * Core::MILLISECONDS) {
+    lastPowerChangeTime = receiveTime;
 
     bool updatePower = false;
     if (linkQuality < 90) {
@@ -121,6 +146,7 @@ void LinkManager::receivePacket(const VCTR::network::DataPacket &packet) {
       link.setTxPower(currentTxPowerDBm);
     }
   }
+  lastPacketTime = receiveTime;
 }
 
 void LinkManager::updateFailsafeState() {
