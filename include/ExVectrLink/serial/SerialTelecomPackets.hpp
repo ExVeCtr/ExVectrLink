@@ -2,6 +2,7 @@
 #define EXVECTRLINK_SERIALTELECOMPACKETS_HPP
 
 #include <cstdint>
+#include <cstring>
 
 #include "ExVectrCore/CanSerialize.hpp"
 
@@ -246,7 +247,7 @@ public:
   uint8_t numBytes() const { return length + 1; }
   void serialize(uint8_t *buffer) const {
     buffer[0] = length;
-    memcpy(buffer + 1, message, length);
+    std::memcpy(buffer + 1, message, length);
   }
   static SerialPacket_Print deserialize(const uint8_t *buffer) {
     SerialPacket_Print packet;
@@ -254,7 +255,7 @@ public:
     if (packet.length > SerialPacket_Print::maxMessageLength) {
       packet.length = SerialPacket_Print::maxMessageLength;
     }
-    memcpy(packet.message, buffer + 1, packet.length);
+    std::memcpy(packet.message, buffer + 1, packet.length);
     packet.message[packet.length - 1] = '\0'; // Ensure null termination.
     return packet;
   }
