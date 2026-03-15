@@ -22,6 +22,7 @@ enum SerialPacketType : uint8_t {
   FhssSynced,        // Sent when FHSS sync is achieved.
   FhssSyncLost,      // Sent when FHSS sync is lost.
   Error,             // Error occured.
+  Print,             // Print message to serial console.
 
   Heartbeat,   // Heartbeat packet.
   LinkInfo,    // Received Packet with RSSI, SNR, and loss rate.
@@ -231,6 +232,30 @@ public:
   static SerialPacket_InitLink deserialize(const uint8_t *buffer) {
     SerialPacket_InitLink packet;
     packet.mak = buffer[0];
+    return packet;
+  }
+};
+
+class SerialPacket_Print {
+public:
+  static constexpr size_t maxMessageLength = 100; // Max length of message.
+  char message[maxMessageLength]; // Null-terminated string to print.
+  uint8_t length = 0;
+
+  SerialPacketType getPacketType() const { return SerialPacketType::Print; }
+  uint8_t numBytes() const { return length + 1; }
+  void serialize(uint8_t *buffer) const {
+    buffer[0] = length;
+    memcpy(buffer + 1, message, length);
+  }
+  static SerialPacket_Print deserialize(const uint8_t *buffer) {
+    SerialPacket_Print packet;
+    packet.length = buffer[0];
+    if (packet.length > SerialPacket_Print::maxMessageLength) {
+      packet.length = SerialPacket_Print::maxMessageLength;
+    }
+    memcpy(packet.message, buffer + 1, packet.length);
+    packet.message[packet.length - 1] = '\0'; // Ensure null termination.
     return packet;
   }
 };
