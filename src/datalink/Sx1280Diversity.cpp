@@ -4,21 +4,22 @@
 
 #include "ExVectrNetwork/DataPacket.hpp"
 #include "ExVectrNetwork/datalink/RadioI.hpp"
-#include "ExVectrNetwork/datalink/sx1280/Sx1280.hpp"
+#include "ExVectrNetwork/datalink/sx1280/Sx1280_2.hpp"
 
 #include "ExVectrLink/datalink/Sx1280Diversity.hpp"
 
 namespace VCTR::ExVectrLink::datalink {
 
 Sx1280Diversity::Sx1280Diversity(
-    std::initializer_list<VCTR::network::datalink::Datalink_SX1280 *> links) {
+    std::initializer_list<VCTR::network::datalink::Datalink_SX1280_V2 *>
+        links) {
   for (auto link : links) {
     addDiversityLink(*link);
   }
 }
 
 void Sx1280Diversity::addDiversityLink(
-    VCTR::network::datalink::Datalink_SX1280 &link) {
+    VCTR::network::datalink::Datalink_SX1280_V2 &link) {
   auto linkIndex = diversityLinks.size();
   diversityLinks.append({&link, {0, 0}});
   link.addTransmitFinishedHandler([this]() {
@@ -38,6 +39,22 @@ void Sx1280Diversity::addDiversityLink(
         linkInfo.lastPacketInfo.snr = linkInfo.link->lastPacketSNR();
         linkInfo.lastPacketInfo.receivedIds.placeBack(dataId, true);
 
+        // LOG_MSG("Received packet %d (last %d) on link %d with RSSI %d and SNR
+        // "
+        //         "%d start at %.3fms, size: %d\n",
+        //         dataId, lastReceivedPacketId, linkIndex,
+        //         linkInfo.lastPacketInfo.rssi, linkInfo.lastPacketInfo.snr,
+        //         (double)dataframe.timestamp / Core::MILLISECONDS,
+        //         data.payload.size());
+
+        // char packetContent[100];
+        // size_t contentSize = std::min((size_t)100, data.payload.size());
+        // for (size_t i = 0; i < contentSize; i++) {
+        //   packetContent[i] = static_cast<char>(data.payload[i]) + '0';
+        // }
+        // packetContent[contentSize] = '\0';
+        // LOG_MSG("Packet content: %s\n", packetContent);
+
         uint8_t idDiff = uint8_t(dataId - lastReceivedPacketId);
         if (idDiff > 0 && idDiff < 128) {
           receiveHandlers_.callHandlers(data);
@@ -48,7 +65,7 @@ void Sx1280Diversity::addDiversityLink(
       });
 }
 
-const VCTR::network::datalink::Datalink_SX1280 *
+const VCTR::network::datalink::Datalink_SX1280_V2 *
 Sx1280Diversity::getDiversityLink(size_t index) const {
   if (index >= diversityLinks.size())
     return nullptr;
@@ -61,7 +78,7 @@ size_t Sx1280Diversity::getCurrentBestLinkIndex() const {
 
 bool Sx1280Diversity::transmitDataframe(
     const VCTR::network::DataPacket &dataframe) {
-  if (diversityLinks.size() == 0) {
+  if (diversityLinks.size() == 0 || transmitting) {
     return false;
   }
 
@@ -71,7 +88,7 @@ bool Sx1280Diversity::transmitDataframe(
 
   auto &bestLink = diversityLinks[currentBestLinkIndex];
   stopReceiveOnAllLinks();
-  bestLink.link->enableTxRx(true);
+  bestLink.link->setEnableTxRx(true);
   transmitting = true;
   return bestLink.link->transmitDataframe(data);
 }
@@ -126,12 +143,12 @@ void Sx1280Diversity::setChannel(size_t channel) {
 
 void Sx1280Diversity::startReceiveOnAllLinks() {
   for (size_t i = 0; i < diversityLinks.size(); i++) {
-    diversityLinks[i].link->enableTxRx(true);
+    diversityLinks[i].link->setEnableTxRx(true);
   }
 }
 void Sx1280Diversity::stopReceiveOnAllLinks() {
   for (size_t i = 0; i < diversityLinks.size(); i++) {
-    diversityLinks[i].link->enableTxRx(false);
+    diversityLinks[i].link->setEnableTxRx(false);
   }
 }
 

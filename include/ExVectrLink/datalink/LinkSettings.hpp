@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-#include "ExVectrNetwork/datalink/sx1280/Sx1280.hpp"
+#include "ExVectrNetwork/datalink/sx1280/Sx1280_2.hpp"
 
 namespace VCTR::ExVectrLink::datalink {
 

@@ -102,7 +102,7 @@ private:
   VCTR::ExVectrLink::packets::SerialPacketType currentPacketType;
   uint8_t packetLength;
 
-  Core::ListBuffer<uint8_t, 1024> sendDataBuffer;
+  Core::ListBuffer<uint8_t, 5000> sendDataBuffer;
 
   int64_t lastSerialByteTime = 0;
   int64_t lastValidPacketTime = 0;

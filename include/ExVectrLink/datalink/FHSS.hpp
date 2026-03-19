@@ -22,19 +22,29 @@ enum class FHSSState : uint8_t {
  */
 class FHSS : public VCTR::network::datalink::DatalinkI,
              public VCTR::Core::Task_Periodic {
+
+  struct ChannelSetting {
+    uint8_t channel;
+    bool isReceiveChannel;
+  };
+
 public:
   FHSS(VCTR::network::datalink::RadioI &radioI);
 
   void setFhssKey(uint8_t key);
   uint8_t getFhssKey() const;
 
-  void enableFhss(bool enable);
-
   FHSSState getFhssState() const;
 
-  // Bool is channel blocked status and uint8_t is the max number of bytes.
-  void addChannelBlockedChangeHandler(
-      VCTR::Core::HandlerGroup<bool, uint8_t>::HandlerFunction handler);
+  void setReceiveStartTime(int64_t time);
+
+  void setNumReceiveChannels(size_t num);
+  void setHoppingInterval(int64_t interval);
+  void setHoppingSyncInterval(int64_t offset);
+
+  void updateReceiveStartTime(int64_t time);
+
+  void setIsRxSide(bool isRxSide);
 
   //--- DatalinkI interface implementation ---
 
@@ -62,21 +72,33 @@ public:
 private:
   void generateSequence();
   void sendFHSSPacket();
+  void updateChannel();
+
+  void updateTiming();
+
+  void updateSearch();
+  void updateHopping();
 
   VCTR::network::datalink::RadioI &radioLink;
 
-  VCTR::Core::HandlerGroup<bool, uint8_t> channelBlockedChangeHandlers;
-
-  VCTR::Core::ListArray<uint8_t> channelSequence;
+  VCTR::Core::ListArray<ChannelSetting> channelSequence;
+  uint8_t currentSeqIndex = 0;
   uint8_t key = 0;
+  uint8_t numReceiveChannels = 0;
+  int64_t hoppingInterval = 20 * Core::MILLISECONDS;
 
   VCTR::network::DataPacket packetToSend;
-  bool waitingForSendFinish = false;
 
-  bool fhssEnabled = false;
+  int64_t lastPacketReceiveStartTime = 0;
 
   int64_t lastFHSSPacketSentTime = 0;
   int64_t lastPacketReceivedTime = 0;
+  int64_t packetReceiveStartTime = 0;
+  int64_t lastHoppingTime = 0;
+  int64_t hoppingOffset = 0;
+
+  bool channelReady = false;
+  bool isRxSide = true;
 
   FHSSState fhssState = FHSSState::Searching;
 };

@@ -7,7 +7,7 @@
 
 #include "ExVectrNetwork/DataPacket.hpp"
 #include "ExVectrNetwork/datalink/RadioI.hpp"
-#include "ExVectrNetwork/datalink/sx1280/Sx1280.hpp"
+#include "ExVectrNetwork/datalink/sx1280/Sx1280_2.hpp"
 
 namespace VCTR::ExVectrLink::datalink {
 
@@ -19,18 +19,19 @@ private:
     Core::ListBuffer<uint8_t, 5> receivedIds;
   };
   struct Sx1280LinkInfo {
-    VCTR::network::datalink::Datalink_SX1280 *link;
+    VCTR::network::datalink::Datalink_SX1280_V2 *link;
     Sx1280PacketRfInfo lastPacketInfo;
   };
 
 public:
   Sx1280Diversity() = default;
   Sx1280Diversity(
-      std::initializer_list<VCTR::network::datalink::Datalink_SX1280 *> links);
+      std::initializer_list<VCTR::network::datalink::Datalink_SX1280_V2 *>
+          links);
 
-  void addDiversityLink(VCTR::network::datalink::Datalink_SX1280 &link);
+  void addDiversityLink(VCTR::network::datalink::Datalink_SX1280_V2 &link);
 
-  const VCTR::network::datalink::Datalink_SX1280 *
+  const VCTR::network::datalink::Datalink_SX1280_V2 *
   getDiversityLink(size_t index) const;
 
   size_t getCurrentBestLinkIndex() const;
