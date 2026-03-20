@@ -108,6 +108,9 @@ void FHSS::taskInit() {
     }
     auto packetType = (FHSSPacketType)packet.payload[packet.payload.size() - 2];
 
+    // Store the preamble-detect timestamp so updateTiming() can align the
+    // local hop schedule to the transmitter's slot boundaries.
+    lastPacketReceiveStartTime = packet.timestamp;
     updateTiming();
 
     lastPacketReceivedTime = Core::NOW();
@@ -118,14 +121,17 @@ void FHSS::taskInit() {
     }
   });
 
+  // Anchor the hop timer to the current time so the very first call to
+  // updateHopping() doesn't see a huge elapsed time and fast-hops.
+  lastHoppingTime = Core::NOW();
+  lastPacketReceivedTime = Core::NOW();
   generateSequence();
 }
 
 void FHSS::taskThread() {
 
-  // updateChannel();
+  updateChannel();
 
-  channelReady = true;
   if (channelReady && !radioLink.isChannelBlocked()) {
     channelReady = false;
 
@@ -169,30 +175,43 @@ void FHSS::updateChannel() {
   if (fhssState == FHSSState::Synced) {
     updateHopping();
   } else {
-    updateSearch();
+    if (isRxSide) {
+      updateSearch();
+    } else {
+      updateHopping();
+    }
   }
 }
 
 void FHSS::updateTiming() {
-  // hoppingOffset = (hoppingOffset + (Core::NOW() - lastPacketReceivedTime)) %
-  //                 hoppingInterval;
+  // Align our local hop schedule to when the received packet's preamble was
+  // detected.  That moment is the start of the transmitter's TX slot, so
+  // using it as lastHoppingTime keeps our slot boundaries in sync.
+  lastHoppingTime = lastPacketReceiveStartTime;
   fhssState = FHSSState::Synced;
 }
 
 void FHSS::updateSearch() {
   int64_t time = Core::NOW();
 
+  // TX side: keep channelReady true so we can transmit on every tick and
+  // be discovered by the RX side regardless of which channel it is scanning.
+  if (!isRxSide && !channelReady) {
+    channelReady = true;
+  }
+
+  // RX side: scan through channels slowly, one channel per full sweep period.
   if (time - lastPacketReceivedTime >
       hoppingInterval * radioLink.getNumChannels()) {
     lastPacketReceivedTime = time;
 
     if (currentSeqIndex == 0) {
-      currentSeqIndex = radioLink.getNumChannels() - 1;
+      currentSeqIndex = (uint8_t)(radioLink.getNumChannels() - 1);
     } else {
       currentSeqIndex--;
     }
 
-    // radioLink.setChannel(channelSequence[currentSeqIndex].channel);
+    radioLink.setChannel(channelSequence[currentSeqIndex].channel);
   }
 }
 
@@ -200,20 +219,36 @@ void FHSS::updateHopping() {
 
   int64_t time = Core::NOW();
 
-  if (time - lastPacketReceivedTime > 500 * Core::MILLISECONDS) {
+  if (isRxSide && time - lastPacketReceivedTime > 500 * Core::MILLISECONDS) {
     fhssState = FHSSState::Searching;
     hoppingOffset = 0;
+    return;
   }
 
-  const float hopStartOffset = 0.8;
-  if (time - lastHoppingTime > hoppingInterval * hopStartOffset) {
-    lastHoppingTime += hoppingInterval + hoppingInterval * (1 - hopStartOffset);
+  const int64_t slotElapsed = time - lastHoppingTime;
+
+  if (slotElapsed >= hoppingInterval) {
+    // ---- Slot boundary ----
+    // Advance lastHoppingTime by exactly one interval so we never drift.
+    lastHoppingTime += hoppingInterval;
     currentSeqIndex = (currentSeqIndex + 1) % channelSequence.size();
-    channelReady = false;
-    // radioLink.setChannel(channelSequence[currentSeqIndex].channel);
-  } else if (!channelReady && time - lastHoppingTime > hoppingInterval) {
+    // Only call setChannel if we haven't already pre-switched to this channel.
+    if (radioLink.getCurrentChannel() !=
+        channelSequence[currentSeqIndex].channel) {
+      radioLink.setChannel(channelSequence[currentSeqIndex].channel);
+    }
+    // Open the TX/RX window for the side whose turn it is this slot.
     channelReady =
         channelSequence[currentSeqIndex].isReceiveChannel == isRxSide;
+
+  } else if (slotElapsed >= (int64_t)(hoppingInterval * 0.8f)) {
+    // ---- Pre-switch (80 % into the slot) ----
+    // Tune to the NEXT channel early so the radio has time to settle before
+    // the slot boundary where TX/RX actually happens.
+    const uint8_t nextIndex = (currentSeqIndex + 1) % channelSequence.size();
+    if (radioLink.getCurrentChannel() != channelSequence[nextIndex].channel) {
+      radioLink.setChannel(channelSequence[nextIndex].channel);
+    }
   }
 }
 
