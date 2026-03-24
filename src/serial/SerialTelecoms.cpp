@@ -60,16 +60,16 @@ void SerialTelecoms::taskCheck() {
 void SerialTelecoms::taskThread() {
   int64_t loopStart = Core::NOW();
 
-  while (serialPort.readable() > 0 &&
-         Core::NOW() - loopStart < 1 * Core::MILLISECONDS) {
+  if (serialPort.readable() > 0 &&
+      Core::NOW() - loopStart < 1 * Core::MILLISECONDS) {
     lastSerialByteTime = loopStart;
     uint8_t incomingByte;
     serialPort.readByte(incomingByte);
     decodeSerialByte(incomingByte);
   }
 
-  while (sendDataBuffer.size() > 0 &&
-         Core::NOW() - loopStart < 1 * Core::MILLISECONDS) {
+  if (sendDataBuffer.size() > 0 &&
+      Core::NOW() - loopStart < 1 * Core::MILLISECONDS) {
     uint8_t byteToSend;
     sendDataBuffer.takeFront(byteToSend);
     serialPort.writeByte(byteToSend);
