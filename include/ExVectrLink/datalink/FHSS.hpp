@@ -46,6 +46,17 @@ public:
 
   void setIsRxSide(bool isRxSide);
 
+  // Value 0-1. Percentage of packets being received.
+  float getLinkQuality() const {
+    return (float)(isRxSide ? linkQuality : otherEndLinkQuality) / 255.0f;
+  }
+
+  int64_t getHoppingOffset() const { return hoppingOffset; }
+
+  // void setGetDio1TimestampFunction(int64_t (*getDio1Timestamp)()) {
+  //   this->getDio1TimestampFunc = getDio1Timestamp;
+  // }
+
   //--- DatalinkI interface implementation ---
 
   bool transmitDataframe(const VCTR::network::DataPacket &dataframe) override;
@@ -71,13 +82,15 @@ public:
 
 private:
   void generateSequence();
-  void sendFHSSPacket();
   void updateChannel();
+  bool shouldHop() const;
 
-  void updateTiming();
-
-  void updateSearch();
   void updateHopping();
+
+  void updateTiming(int64_t revcStartTimestamp);
+  void hopChannel();
+
+  // int64_t getDio1Timestamp();
 
   VCTR::network::datalink::RadioI &radioLink;
 
@@ -91,14 +104,33 @@ private:
 
   int64_t lastPacketReceiveStartTime = 0;
 
+  VCTR::Core::ListBuffer<int64_t, 50> receiveTimestamps;
+  VCTR::Core::ListBuffer<int64_t, 50> hoppingErrors;
+  bool newRecv = false;
+  uint8_t linkQuality = 0;
+  uint8_t otherEndLinkQuality = 0;
+  int64_t lastUpdateTime = 0;
+
   int64_t lastFHSSPacketSentTime = 0;
   int64_t lastPacketReceivedTime = 0;
   int64_t packetReceiveStartTime = 0;
   int64_t lastHoppingTime = 0;
-  int64_t hoppingOffset = 0;
 
-  bool channelReady = false;
-  bool isRxSide = true;
+  int hopOffsetConfidence = 0;
+  int64_t hoppingOffset = 0;
+  int64_t hoppingOffsetDt = 0;
+
+  uint8_t rxPacketRatio = 9;
+  uint8_t txPacketCount = 0;
+
+  bool isRxSide = false;
+  bool channelTxReady = false;
+  bool isNextChannelRecv = false;
+  bool channelReceived = false;
+  bool isReceiveChannel = false;
+
+  // Function to retrieve the current dio1 timestamp.
+  // int64_t (*getDio1TimestampFunc)() = nullptr;
 
   FHSSState fhssState = FHSSState::Searching;
 };

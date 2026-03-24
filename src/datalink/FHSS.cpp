@@ -1,3 +1,5 @@
+#include <Arduino.h>
+
 #include "ExVectrCore/CanSerialize.hpp"
 #include "ExVectrCore/handler.hpp"
 #include "ExVectrCore/list_array.hpp"
@@ -16,34 +18,8 @@ enum class FHSSPacketType : uint8_t {
   LinkInfo,
 };
 
-struct LinkInfoPacket {
-  uint8_t rssi;
-  uint8_t snr;
-  uint8_t lq;
-  uint8_t channel;
-  uint8_t uid;
-
-  void serialize(uint8_t *buffer) const {
-    buffer[0] = rssi;
-    buffer[1] = snr;
-    buffer[2] = lq;
-    buffer[3] = channel;
-    buffer[4] = uid;
-  }
-
-  void deserialize(const uint8_t *buffer) {
-    rssi = buffer[0];
-    snr = buffer[1];
-    lq = buffer[2];
-    channel = buffer[3];
-    uid = buffer[4];
-  }
-
-  size_t numBytes() { return 5; }
-};
-
 FHSS::FHSS(VCTR::network::datalink::RadioI &radioI)
-    : Core::Task_Periodic("FHSS", 1 * Core::MILLISECONDS), radioLink(radioI) {
+    : Core::Task_Periodic("FHSS", 100 * Core::MILLISECONDS), radioLink(radioI) {
 
   Core::getSystemScheduler().addTask(*this);
 }
@@ -75,20 +51,31 @@ bool FHSS::transmitDataframe(const VCTR::network::DataPacket &dataframe) {
   if (packetToSend.payload.size() > 0) {
     return false;
   }
+
   packetToSend = dataframe;
   packetToSend.payload.append((uint8_t)FHSSPacketType::Data);
+  packetToSend.payload.append((uint8_t)txPacketCount);
+  packetToSend.payload.append((uint8_t)linkQuality);
   packetToSend.payload.append((uint8_t)key);
   return true;
 }
 
 size_t FHSS::getMaxPacketSize() const { return radioLink.getMaxPacketSize(); }
 
-bool FHSS::isChannelBlocked() const {
-  return radioLink.isChannelBlocked() || packetToSend.payload.size() > 0;
+bool FHSS::isChannelBlocked() const { return packetToSend.payload.size() > 0; }
+
+bool FHSS::shouldHop() const {
+  if (fhssState == FHSSState::Synced) {
+    int64_t targetTime =
+        isNextChannelRecv ? (hoppingInterval * 1) : hoppingInterval;
+    return (Core::NOW() - lastHoppingTime + hoppingOffset) >= targetTime;
+  } else {
+    return (Core::NOW() - lastHoppingTime) > 10 * hoppingInterval;
+  }
 }
 
 void FHSS::taskCheck() {
-  if (packetToSend.payload.size() > 0) {
+  if (shouldHop()) {
     setDeadline(Core::NOW());
   }
 }
@@ -96,33 +83,35 @@ void FHSS::taskCheck() {
 void FHSS::taskInit() {
 
   radioLink.addReceiveHandler([this](const network::DataPacket &packet) {
-    if (packet.payload.size() < 2) {
+    if (packet.payload.size() < 4) {
       return;
     }
-
-    channelReady = false;
 
     auto packetKey = packet.payload[packet.payload.size() - 1];
     if (packetKey != key) {
       return;
     }
-    auto packetType = (FHSSPacketType)packet.payload[packet.payload.size() - 2];
 
-    // Store the preamble-detect timestamp so updateTiming() can align the
-    // local hop schedule to the transmitter's slot boundaries.
-    lastPacketReceiveStartTime = packet.timestamp;
-    updateTiming();
+    auto recvLinkQuality = packet.payload[packet.payload.size() - 2];
+    auto txPacketCountRecv = packet.payload[packet.payload.size() - 3];
+    auto packetType = (FHSSPacketType)packet.payload[packet.payload.size() - 4];
+
+    if (isRxSide) {
+      txPacketCount = txPacketCountRecv;
+    }
+
+    otherEndLinkQuality = recvLinkQuality;
+
+    updateTiming(packet.timestamp);
 
     lastPacketReceivedTime = Core::NOW();
     if (packetType == FHSSPacketType::Data) {
       auto dataPacket = packet;
-      dataPacket.payload.popDiscard(2);
+      dataPacket.payload.popDiscard(4);
       receiveHandlers_.callHandlers(dataPacket);
     }
   });
 
-  // Anchor the hop timer to the current time so the very first call to
-  // updateHopping() doesn't see a huge elapsed time and fast-hops.
   lastHoppingTime = Core::NOW();
   lastPacketReceivedTime = Core::NOW();
   generateSequence();
@@ -132,19 +121,23 @@ void FHSS::taskThread() {
 
   updateChannel();
 
-  if (channelReady && !radioLink.isChannelBlocked()) {
-    channelReady = false;
+  if (channelTxReady && !radioLink.isChannelBlocked()) {
 
     if (packetToSend.payload.size() > 0) {
-
-      // LOG_MSG("Transmitting FHSS packet. Payload size: %d\n",
-      //  packetToSend.payload.size());
       radioLink.transmitDataframe(packetToSend);
       packetToSend.payload.clear();
     } else {
-      // sendFHSSPacket();
+      packetToSend.payload.append((uint8_t)FHSSPacketType::LinkInfo);
+      packetToSend.payload.append((uint8_t)txPacketCount);
+      packetToSend.payload.append((uint8_t)linkQuality);
+      packetToSend.payload.append((uint8_t)key);
+      radioLink.transmitDataframe(packetToSend);
+      packetToSend.payload.clear();
     }
   }
+
+  // Falsify here so we dont end up sending data near end of hop slot
+  channelTxReady = false;
 }
 
 void FHSS::generateSequence() {
@@ -156,100 +149,153 @@ void FHSS::generateSequence() {
   currentSeqIndex = 0;
 }
 
-void FHSS::sendFHSSPacket() {
-  LinkInfoPacket linkInfo;
-  linkInfo.rssi = 0;
-  linkInfo.snr = 0;
-  linkInfo.lq = 0;
-  linkInfo.channel = radioLink.getCurrentChannel();
-  linkInfo.uid = 0;
-  network::DataPacket packet;
-  packet.payload.setSize(linkInfo.numBytes() + 2);
-  linkInfo.serialize(packet.payload.getPtr());
-  packet.payload[packet.payload.size() - 2] = (uint8_t)FHSSPacketType::LinkInfo;
-  packet.payload[packet.payload.size() - 1] = (uint8_t)key;
-  radioLink.transmitDataframe(packet);
-}
-
 void FHSS::updateChannel() {
-  if (fhssState == FHSSState::Synced) {
-    updateHopping();
-  } else {
-    if (isRxSide) {
-      updateSearch();
-    } else {
-      updateHopping();
-    }
-  }
-}
 
-void FHSS::updateTiming() {
-  // Align our local hop schedule to when the received packet's preamble was
-  // detected.  That moment is the start of the transmitter's TX slot, so
-  // using it as lastHoppingTime keeps our slot boundaries in sync.
-  lastHoppingTime = lastPacketReceiveStartTime;
-  fhssState = FHSSState::Synced;
-}
-
-void FHSS::updateSearch() {
-  int64_t time = Core::NOW();
-
-  // TX side: keep channelReady true so we can transmit on every tick and
-  // be discovered by the RX side regardless of which channel it is scanning.
-  if (!isRxSide && !channelReady) {
-    channelReady = true;
+  // Tx is always synced.
+  if (!isRxSide && fhssState != FHSSState::Synced) {
+    fhssState = FHSSState::Synced;
   }
 
-  // RX side: scan through channels slowly, one channel per full sweep period.
-  if (time - lastPacketReceivedTime >
-      hoppingInterval * radioLink.getNumChannels()) {
-    lastPacketReceivedTime = time;
-
-    if (currentSeqIndex == 0) {
-      currentSeqIndex = (uint8_t)(radioLink.getNumChannels() - 1);
-    } else {
-      currentSeqIndex--;
-    }
-
-    radioLink.setChannel(channelSequence[currentSeqIndex].channel);
-  }
-}
-
-void FHSS::updateHopping() {
-
-  int64_t time = Core::NOW();
-
-  if (isRxSide && time - lastPacketReceivedTime > 500 * Core::MILLISECONDS) {
+  if (isRxSide && fhssState == FHSSState::Synced &&
+      Core::NOW() - lastPacketReceivedTime > 100 * hoppingInterval) {
     fhssState = FHSSState::Searching;
     hoppingOffset = 0;
-    return;
+    lastHoppingTime = Core::NOW();
+    hoppingErrors.clear();
   }
 
-  const int64_t slotElapsed = time - lastHoppingTime;
-
-  if (slotElapsed >= hoppingInterval) {
-    // ---- Slot boundary ----
-    // Advance lastHoppingTime by exactly one interval so we never drift.
-    lastHoppingTime += hoppingInterval;
-    currentSeqIndex = (currentSeqIndex + 1) % channelSequence.size();
-    // Only call setChannel if we haven't already pre-switched to this channel.
-    if (radioLink.getCurrentChannel() !=
-        channelSequence[currentSeqIndex].channel) {
-      radioLink.setChannel(channelSequence[currentSeqIndex].channel);
+  if (fhssState == FHSSState::Synced) {
+    if (shouldHop()) {
+      hopChannel();
     }
-    // Open the TX/RX window for the side whose turn it is this slot.
-    channelReady =
-        channelSequence[currentSeqIndex].isReceiveChannel == isRxSide;
+  } else if (shouldHop()) {
+    hopChannel();
+    lastHoppingTime = Core::NOW();
+  }
 
-  } else if (slotElapsed >= (int64_t)(hoppingInterval * 0.8f)) {
-    // ---- Pre-switch (80 % into the slot) ----
-    // Tune to the NEXT channel early so the radio has time to settle before
-    // the slot boundary where TX/RX actually happens.
-    const uint8_t nextIndex = (currentSeqIndex + 1) % channelSequence.size();
-    if (radioLink.getCurrentChannel() != channelSequence[nextIndex].channel) {
-      radioLink.setChannel(channelSequence[nextIndex].channel);
+  if (receiveTimestamps.size() > 1 &&
+      (newRecv || Core::NOW() - lastUpdateTime > 1 * Core::SECONDS)) {
+    lastUpdateTime = Core::NOW();
+    newRecv = false;
+    int64_t timeSpan = receiveTimestamps[receiveTimestamps.size() - 1] -
+                       receiveTimestamps[0] + hoppingInterval;
+    size_t expectedPackets = timeSpan / hoppingInterval;
+    expectedPackets = expectedPackets - expectedPackets / rxPacketRatio;
+    float quality = (float)receiveTimestamps.size() / expectedPackets * 255;
+    if (quality > 255) {
+      linkQuality = 255;
+    } else {
+      linkQuality = (uint8_t)quality;
+    }
+  } else if (receiveTimestamps.size() > 0 &&
+             Core::NOW() - receiveTimestamps[receiveTimestamps.size() - 1] >
+                 1 * Core::SECONDS) {
+    linkQuality = 0;
+    otherEndLinkQuality = 0;
+  }
+
+  if (receiveTimestamps.size() > 0) {
+    while (receiveTimestamps.size() > 0 &&
+           Core::NOW() - receiveTimestamps[0] > 1 * Core::SECONDS) {
+      receiveTimestamps.removeFront();
     }
   }
 }
+
+void FHSS::updateTiming(int64_t revcStartTimestamp) {
+
+  receiveTimestamps.placeBack(revcStartTimestamp, true);
+  newRecv = true;
+  channelReceived = true;
+
+  if (fhssState == FHSSState::Searching) {
+    fhssState = FHSSState::Synced;
+    hoppingOffset = 0;
+    hopOffsetConfidence = 1;
+    lastHoppingTime = revcStartTimestamp;
+    hoppingErrors.clear();
+  } else if (isRxSide) {
+    int64_t expectedReceiveTime = lastHoppingTime + hoppingOffset;
+    int64_t offsetError = revcStartTimestamp - expectedReceiveTime;
+
+    hoppingErrors.placeBack(offsetError, true);
+
+    int64_t offsetCorrection = 0;
+    if (hoppingErrors.size() > 3) {
+      auto variance = hoppingErrors.getStandardDeviation();
+      VCTR::Core::ListBuffer<int64_t, 50> filteredErrors;
+      for (size_t i = 0; i < hoppingErrors.size(); i++) {
+        if (abs(hoppingErrors[i]) < variance * 2) {
+          filteredErrors.placeBack(hoppingErrors[i]);
+        }
+      }
+      auto averageError = filteredErrors.getAverage();
+      offsetCorrection = offsetError / 100;
+    } else {
+      offsetCorrection = offsetError / 2;
+    }
+    hoppingOffset += offsetCorrection;
+
+    // if (abs(offsetError) < hoppingInterval / hopOffsetConfidence * 2) {
+    //   const int maxConfidence = 50;
+    //   hopOffsetConfidence++;
+    //   if (hopOffsetConfidence > maxConfidence) {
+    //     hopOffsetConfidence = maxConfidence;
+    //   }
+    //   hoppingOffset += offsetError / hopOffsetConfidence;
+    // }
+    // lastHoppingTime = revcStartTimestamp;
+  }
+
+  // Premature hop if we need to receive on next channel.
+  // This way we are ready as soon as possible.
+  // if (isNextChannelRecv && fhssState == FHSSState::Synced &&
+  //     Core::NOW() - lastHoppingTime > hoppingInterval * 0.5) {
+  //   hopChannel();
+  // }
+}
+
+void FHSS::hopChannel() {
+
+  lastHoppingTime += hoppingInterval;
+
+  if (!channelReceived && isReceiveChannel && hopOffsetConfidence > 1) {
+    hopOffsetConfidence--;
+  }
+
+  currentSeqIndex = (currentSeqIndex + 1) % channelSequence.size();
+  radioLink.setChannel(channelSequence[currentSeqIndex].channel);
+
+  channelTxReady = true;
+  isNextChannelRecv = false;
+  if (txPacketCount == 0) {
+    channelTxReady = false;
+  }
+
+  isReceiveChannel = !channelTxReady;
+
+  txPacketCount++;
+  if (txPacketCount > rxPacketRatio) {
+    txPacketCount = 0;
+  }
+
+  if (txPacketCount == 0) {
+    isNextChannelRecv = true;
+  }
+
+  if (isRxSide) {
+    channelTxReady = !channelTxReady;
+    isNextChannelRecv = !isNextChannelRecv;
+  }
+}
+
+// int64_t FHSS::getDio1Timestamp() {
+//   if (getDio1TimestampFunc != nullptr) {
+//     return getDio1TimestampFunc();
+//   }
+//   return 0;
+// }
+
+void FHSS::updateHopping() {}
 
 } // namespace VCTR::ExVectrLink::datalink
