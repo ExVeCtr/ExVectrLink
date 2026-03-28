@@ -17,6 +17,11 @@ namespace VCTR::ExVectrLink /* ExVectrLinkI */ {
  */
 class LinkManager : public Core::Task_Periodic,
                     public network::datalink::DatalinkI {
+
+  static constexpr uint8_t powerLevels[] = {10, 12, 20, 24, 27, 33};
+  static constexpr size_t numPowerLevels =
+      sizeof(powerLevels) / sizeof(powerLevels[0]);
+
 public:
   /**
    * @brief Construct a new Link Manager object.
@@ -67,8 +72,8 @@ private:
   VCTR::ExVectrLink::ExVectrLinkI &link;
   uint8_t mak;
 
-  uint8_t maxTxPowerDBm = 20;
-  uint8_t currentTxPowerDBm = 12;
+  uint8_t maxTxPowerDBm = 10;
+  uint8_t currentTxPowerDBm = 0;
 
   int64_t lastPowerChangeTime = 0;
 

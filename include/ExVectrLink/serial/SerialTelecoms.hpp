@@ -60,7 +60,14 @@ public:
   void addSerialPacketHandler(std::function<void(const T &packet)> handler) {
     addSerialPacketHandler(T().getPacketType(),
                            [handler](const Core::ListArray<uint8_t> &data) {
-                             handler(T::deserialize(data.getPtr()));
+                             T packet;
+                             if (!packet.deserialize(data.getPtr())) {
+                               return;
+                             }
+                             if (packet.numBytes() != data.size()) {
+                               return;
+                             }
+                             handler(packet);
                            });
   }
 

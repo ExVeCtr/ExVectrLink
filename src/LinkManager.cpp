@@ -60,6 +60,8 @@ void LinkManager::taskThread() {
   updateFailsafeState();
   updateDynamicPowerManagement();
   updateBindingState();
+  updateLinkQualityMetrics();
+  updateDynamicPowerManagement();
 }
 
 void LinkManager::enableFhss(bool enable) {
@@ -67,16 +69,11 @@ void LinkManager::enableFhss(bool enable) {
   link.setEnableFhss(enable, fhssSequenceKey);
 }
 
-void LinkManager::setMaxTxPower(uint8_t maxDBm) {
-  maxTxPowerDBm = clampTxPower(maxDBm);
+void LinkManager::setMaxTxPower(uint8_t maxDBm) { maxTxPowerDBm = maxDBm; }
 
-  if (currentTxPowerDBm > maxTxPowerDBm) {
-    currentTxPowerDBm = maxTxPowerDBm;
-    link.setTxPower(currentTxPowerDBm);
-  }
+uint8_t LinkManager::getCurrentTxPower() const {
+  return powerLevels[currentTxPowerDBm];
 }
-
-uint8_t LinkManager::getCurrentTxPower() const { return currentTxPowerDBm; }
 
 bool LinkManager::isFailsafe() const { return failsafe; }
 
@@ -128,33 +125,36 @@ void LinkManager::receivePacket(const VCTR::network::DataPacket &packet) {
                 packet.payload.size() - 1);
     receiveHandlers_.callHandlers(dataPacket);
   }
-
-  updateLinkQualityMetrics();
-  if (receiveTime - lastPowerChangeTime > 100 * Core::MILLISECONDS) {
-    lastPowerChangeTime = receiveTime;
-
-    bool updatePower = false;
-    if (linkQuality < 90) {
-      currentTxPowerDBm++;
-      updatePower = true;
-    } else if (linkQuality > 99) {
-      currentTxPowerDBm--;
-      updatePower = true;
-    }
-    if (updatePower) {
-      currentTxPowerDBm = clampTxPower(currentTxPowerDBm);
-      link.setTxPower(currentTxPowerDBm);
-    }
-  }
   lastPacketTime = receiveTime;
 }
 
 void LinkManager::updateFailsafeState() {
-  constexpr int64_t failsafeTimeout = 500 * Core::MILLISECONDS;
+  constexpr int64_t failsafeTimeout = 1000 * Core::MILLISECONDS;
   failsafe = (Core::NOW() - lastPacketTime) > failsafeTimeout;
+  if (failsafe) {
+    // currentTxPowerDBm = maxTxPowerDBm;
+    // link.setTxPower(maxTxPowerDBm);
+  }
 }
 
-void LinkManager::updateDynamicPowerManagement() {}
+void LinkManager::updateDynamicPowerManagement() {
+  if (Core::NOW() - lastPowerChangeTime > 100 * Core::MILLISECONDS) {
+    lastPowerChangeTime = Core::NOW();
+
+    bool updatePower = false;
+    if (linkQuality < 80 && currentTxPowerDBm < numPowerLevels - 1 &&
+        powerLevels[currentTxPowerDBm + 1] <= maxTxPowerDBm) {
+      currentTxPowerDBm++;
+      updatePower = true;
+    } else if (linkQuality > 95 && currentTxPowerDBm > 0) {
+      currentTxPowerDBm--;
+      updatePower = true;
+    }
+    if (updatePower) {
+      link.setTxPower(powerLevels[currentTxPowerDBm]);
+    }
+  }
+}
 
 void LinkManager::updateBindingState() {}
 
