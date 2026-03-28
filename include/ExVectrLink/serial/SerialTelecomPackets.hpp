@@ -48,10 +48,9 @@ public:
   SerialPacketType getPacketType() const { return SerialPacketType::Ack; }
   uint8_t numBytes() const { return 1; }
   void serialize(uint8_t *buffer) const { buffer[0] = success ? 1 : 0; }
-  static SerialPacket_Ack deserialize(const uint8_t *buffer) {
-    SerialPacket_Ack packet;
-    packet.success = buffer[0] == 1;
-    return packet;
+  bool deserialize(const uint8_t *buffer) {
+    success = buffer[0] == 1;
+    return true;
   }
 };
 
@@ -68,11 +67,10 @@ public:
     buffer[0] = maxBytes;
     buffer[1] = blocked ? 1 : 0;
   }
-  static SerialPacket_ChannelState deserialize(const uint8_t *buffer) {
-    SerialPacket_ChannelState packet;
-    packet.maxBytes = buffer[0];
-    packet.blocked = buffer[1] == 1;
-    return packet;
+  bool deserialize(const uint8_t *buffer) {
+    maxBytes = buffer[0];
+    blocked = buffer[1] == 1;
+    return true;
   }
 };
 
@@ -85,10 +83,9 @@ public:
   }
   uint8_t numBytes() const { return 1; }
   void serialize(uint8_t *buffer) const { buffer[0] = presetIndex; }
-  static SerialPacket_SetModulationPreset deserialize(const uint8_t *buffer) {
-    SerialPacket_SetModulationPreset packet;
-    packet.presetIndex = buffer[0];
-    return packet;
+  bool deserialize(const uint8_t *buffer) {
+    presetIndex = buffer[0];
+    return true;
   }
 };
 
@@ -101,10 +98,9 @@ public:
   }
   uint8_t numBytes() const { return 1; }
   void serialize(uint8_t *buffer) const { buffer[0] = txPower; }
-  static SerialPacket_SetTxPower deserialize(const uint8_t *buffer) {
-    SerialPacket_SetTxPower packet;
-    packet.txPower = buffer[0];
-    return packet;
+  bool deserialize(const uint8_t *buffer) {
+    txPower = buffer[0];
+    return true;
   }
 };
 
@@ -117,10 +113,9 @@ public:
   }
   uint8_t numBytes() const { return 1; }
   void serialize(uint8_t *buffer) const { buffer[0] = channelIndex; }
-  static SerialPacket_SetLinkChannel deserialize(const uint8_t *buffer) {
-    SerialPacket_SetLinkChannel packet;
-    packet.channelIndex = buffer[0];
-    return packet;
+  bool deserialize(const uint8_t *buffer) {
+    channelIndex = buffer[0];
+    return true;
   }
 };
 
@@ -138,12 +133,11 @@ public:
     buffer[3] = (seqKey >> 16) & 0xFF;
     buffer[4] = (seqKey >> 24) & 0xFF;
   }
-  static SerialPacket_SetEnableFhss deserialize(const uint8_t *buffer) {
-    SerialPacket_SetEnableFhss packet;
-    packet.enable = buffer[0] == 1;
-    packet.seqKey =
+  bool deserialize(const uint8_t *buffer) {
+    enable = buffer[0] == 1;
+    seqKey =
         buffer[1] | (buffer[2] << 8) | (buffer[3] << 16) | (buffer[4] << 24);
-    return packet;
+    return true;
   }
 };
 
@@ -156,10 +150,9 @@ public:
   }
   uint8_t numBytes() const { return 1; }
   void serialize(uint8_t *buffer) const { buffer[0] = temperatureC; }
-  static SerialPacket_DeviceTemperature deserialize(const uint8_t *buffer) {
-    SerialPacket_DeviceTemperature packet;
-    packet.temperatureC = buffer[0];
-    return packet;
+  bool deserialize(const uint8_t *buffer) {
+    temperatureC = buffer[0];
+    return true;
   }
 };
 
@@ -177,11 +170,10 @@ public:
     buffer[2] = (baudRate >> 16) & 0xFF;
     buffer[3] = (baudRate >> 24) & 0xFF;
   }
-  static SerialPacket_SetBaudRate deserialize(const uint8_t *buffer) {
-    SerialPacket_SetBaudRate packet;
-    packet.baudRate =
+  bool deserialize(const uint8_t *buffer) {
+    baudRate =
         buffer[0] | (buffer[1] << 8) | (buffer[2] << 16) | (buffer[3] << 24);
-    return packet;
+    return true;
   }
 };
 
@@ -208,10 +200,9 @@ public:
     buffer[7] = (duration >> 48) & 0xFF;
     buffer[8] = (duration >> 56) & 0xFF;
   }
-  static SerialPacket_UpdateMode deserialize(const uint8_t *buffer) {
-    SerialPacket_UpdateMode packet;
-    packet.forward = buffer[0] == 1;
-    packet.duration = static_cast<int64_t>(buffer[1]) |
+  bool deserialize(const uint8_t *buffer) {
+    forward = buffer[0] == 1;
+    duration = static_cast<int64_t>(buffer[1]) |
                       (static_cast<int64_t>(buffer[2]) << 8) |
                       (static_cast<int64_t>(buffer[3]) << 16) |
                       (static_cast<int64_t>(buffer[4]) << 24) |
@@ -219,7 +210,7 @@ public:
                       (static_cast<int64_t>(buffer[6]) << 40) |
                       (static_cast<int64_t>(buffer[7]) << 48) |
                       (static_cast<int64_t>(buffer[8]) << 56);
-    return packet;
+    return true;
   }
 };
 
@@ -230,10 +221,9 @@ public:
   SerialPacketType getPacketType() const { return SerialPacketType::InitLink; }
   uint8_t numBytes() const { return 1; }
   void serialize(uint8_t *buffer) const { buffer[0] = mak; }
-  static SerialPacket_InitLink deserialize(const uint8_t *buffer) {
-    SerialPacket_InitLink packet;
-    packet.mak = buffer[0];
-    return packet;
+  bool deserialize(const uint8_t *buffer) {
+    mak = buffer[0];
+    return true;
   }
 };
 
@@ -249,15 +239,18 @@ public:
     buffer[0] = length;
     std::memcpy(buffer + 1, message, length);
   }
-  static SerialPacket_Print deserialize(const uint8_t *buffer) {
-    SerialPacket_Print packet;
-    packet.length = buffer[0];
-    if (packet.length > SerialPacket_Print::maxMessageLength) {
-      packet.length = SerialPacket_Print::maxMessageLength;
+  bool deserialize(const uint8_t *buffer) {
+    length = buffer[0];
+    if (length > SerialPacket_Print::maxMessageLength) {
+      length = SerialPacket_Print::maxMessageLength;
     }
-    std::memcpy(packet.message, buffer + 1, packet.length);
-    packet.message[packet.length - 1] = '\0'; // Ensure null termination.
-    return packet;
+    if (length > 0) {
+      std::memcpy(message, buffer + 1, length);
+      message[length - 1] = '\0'; // Ensure null termination.
+    } else {
+      message[0] = '\0';
+    }
+    return true;
   }
 };
 
@@ -270,10 +263,9 @@ public:
   SerialPacketType getPacketType() const { return SerialPacketType::Heartbeat; }
   uint8_t numBytes() const { return 1; }
   void serialize(uint8_t *buffer) const { buffer[0] = isConnected ? 1 : 0; }
-  static SerialPacket_Heartbeat deserialize(const uint8_t *buffer) {
-    SerialPacket_Heartbeat packet;
-    packet.isConnected = buffer[0] == 1;
-    return packet;
+  bool deserialize(const uint8_t *buffer) {
+    isConnected = buffer[0] == 1;
+    return true;
   }
 };
 
@@ -298,15 +290,14 @@ public:
     buffer[4] = dualLinkMode ? 1 : 0;
     buffer[5] = txPower;
   }
-  static SerialPacket_LinkInfo deserialize(const uint8_t *buffer) {
-    SerialPacket_LinkInfo info;
-    info.rssi = buffer[0];
-    info.snr = buffer[1];
-    info.antenna = buffer[2];
-    info.lossRate = buffer[3];
-    info.dualLinkMode = buffer[4] == 1;
-    info.txPower = buffer[5];
-    return info;
+  bool deserialize(const uint8_t *buffer) {
+    rssi = buffer[0];
+    snr = buffer[1];
+    antenna = buffer[2];
+    lossRate = buffer[3];
+    dualLinkMode = buffer[4] == 1;
+    txPower = buffer[5];
+    return true;
   }
 };
 
