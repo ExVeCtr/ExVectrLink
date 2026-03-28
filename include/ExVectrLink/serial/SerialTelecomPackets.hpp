@@ -1,6 +1,7 @@
 #ifndef EXVECTRLINK_SERIALTELECOMPACKETS_HPP
 #define EXVECTRLINK_SERIALTELECOMPACKETS_HPP
 
+#include <concepts>
 #include <cstdint>
 #include <cstring>
 
@@ -203,13 +204,13 @@ public:
   bool deserialize(const uint8_t *buffer) {
     forward = buffer[0] == 1;
     duration = static_cast<int64_t>(buffer[1]) |
-                      (static_cast<int64_t>(buffer[2]) << 8) |
-                      (static_cast<int64_t>(buffer[3]) << 16) |
-                      (static_cast<int64_t>(buffer[4]) << 24) |
-                      (static_cast<int64_t>(buffer[5]) << 32) |
-                      (static_cast<int64_t>(buffer[6]) << 40) |
-                      (static_cast<int64_t>(buffer[7]) << 48) |
-                      (static_cast<int64_t>(buffer[8]) << 56);
+               (static_cast<int64_t>(buffer[2]) << 8) |
+               (static_cast<int64_t>(buffer[3]) << 16) |
+               (static_cast<int64_t>(buffer[4]) << 24) |
+               (static_cast<int64_t>(buffer[5]) << 32) |
+               (static_cast<int64_t>(buffer[6]) << 40) |
+               (static_cast<int64_t>(buffer[7]) << 48) |
+               (static_cast<int64_t>(buffer[8]) << 56);
     return true;
   }
 };
