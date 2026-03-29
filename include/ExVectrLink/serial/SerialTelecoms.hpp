@@ -166,12 +166,16 @@ public:
 
   void setMediaAccessKey(uint8_t mak) override;
 
+  bool isConnected() override;
+
   const VCTR::ExVectrLink::datalink::LinkInfo &getLinkInfo() const override;
 
 private:
   void addHandlers();
 
   bool initialized_ = false;
+
+  bool isConnected_ = false;
 
   SerialTelecoms &telecoms;
 

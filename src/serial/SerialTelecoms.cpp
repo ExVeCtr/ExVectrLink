@@ -257,6 +257,13 @@ void SerialTelecomsDatalink::addHandlers() {
         linkinfo = {packet.rssi, packet.snr, packet.antenna, packet.lossRate,
                     packet.dualLinkMode};
       });
+
+  telecoms
+      .addSerialPacketHandler<ExVectrLink::packets::SerialPacket_FhssSyncState>(
+          [this](
+              const ExVectrLink::packets::SerialPacket_FhssSyncState &packet) {
+            isConnected_ = packet.synced;
+          });
 }
 
 void SerialTelecomsDatalink::setTxPower(uint8_t txPower) {
@@ -285,6 +292,8 @@ void SerialTelecomsDatalink::setLinkChannel(uint8_t channelIndex) {
 void SerialTelecomsDatalink::setMediaAccessKey(uint8_t mak) {
   telecoms.sendSerialPacket<SerialPacket_InitLink>(SerialPacket_InitLink{mak});
 }
+
+bool SerialTelecomsDatalink::isConnected() { return isConnected_; }
 
 const VCTR::ExVectrLink::datalink::LinkInfo &
 SerialTelecomsDatalink::getLinkInfo() const {

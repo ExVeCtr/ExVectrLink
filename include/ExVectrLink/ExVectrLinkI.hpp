@@ -24,6 +24,8 @@ public:
 
   virtual void setMediaAccessKey(uint8_t mak) = 0;
 
+  virtual bool isConnected() = 0;
+
   virtual const VCTR::ExVectrLink::datalink::LinkInfo &getLinkInfo() const = 0;
 };
 

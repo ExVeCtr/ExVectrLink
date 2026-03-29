@@ -21,8 +21,7 @@ enum SerialPacketType : uint8_t {
   StartFHSS,           // Start FHSS. Requires 4 byte key.
 
   DeviceTemperature, // Send device temperature.
-  FhssSynced,        // Sent when FHSS sync is achieved.
-  FhssSyncLost,      // Sent when FHSS sync is lost.
+  FhssSyncState,     // FHSS sync status
   Error,             // Error occured.
   Print,             // Print message to serial console.
 
@@ -153,6 +152,21 @@ public:
   void serialize(uint8_t *buffer) const { buffer[0] = temperatureC; }
   bool deserialize(const uint8_t *buffer) {
     temperatureC = buffer[0];
+    return true;
+  }
+};
+
+class SerialPacket_FhssSyncState {
+public:
+  bool synced;
+
+  SerialPacketType getPacketType() const {
+    return SerialPacketType::FhssSyncState;
+  }
+  uint8_t numBytes() const { return 1; }
+  void serialize(uint8_t *buffer) const { buffer[0] = synced; }
+  bool deserialize(const uint8_t *buffer) {
+    synced = buffer[0];
     return true;
   }
 };

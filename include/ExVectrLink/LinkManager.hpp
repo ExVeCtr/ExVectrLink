@@ -18,7 +18,7 @@ namespace VCTR::ExVectrLink /* ExVectrLinkI */ {
 class LinkManager : public Core::Task_Periodic,
                     public network::datalink::DatalinkI {
 
-  static constexpr uint8_t powerLevels[] = {10, 12, 20, 24, 27, 33};
+  static constexpr uint8_t powerLevels[] = {12, 20, 24, 27, 33};
   static constexpr size_t numPowerLevels =
       sizeof(powerLevels) / sizeof(powerLevels[0]);
 
@@ -86,7 +86,7 @@ private:
   uint8_t linkQuality = 0;
 
   int64_t lastPacketTime = 0;
-  int64_t failsafeTimeout = 500 * Core::MILLISECONDS;
+  int64_t failsafeTimeout = 1000 * Core::MILLISECONDS;
 };
 
 } // namespace VCTR::ExVectrLink

@@ -130,10 +130,25 @@ void LinkManager::receivePacket(const VCTR::network::DataPacket &packet) {
 
 void LinkManager::updateFailsafeState() {
   constexpr int64_t failsafeTimeout = 1000 * Core::MILLISECONDS;
-  failsafe = (Core::NOW() - lastPacketTime) > failsafeTimeout;
+  // failsafe = (Core::NOW() - lastPacketTime) > failsafeTimeout;
+  // if (failsafe) {
+  //   currentTxPowerDBm = 0;
+  //   for (size_t i = 0; i < numPowerLevels - 1 &&
+  //                      powerLevels[currentTxPowerDBm] < maxTxPowerDBm;
+  //        i++) {
+  //     currentTxPowerDBm++;
+  //   }
+  //   link.setTxPower(powerLevels[currentTxPowerDBm]);
+  // }
+  failsafe = !link.isConnected();
   if (failsafe) {
-    // currentTxPowerDBm = maxTxPowerDBm;
-    // link.setTxPower(maxTxPowerDBm);
+    currentTxPowerDBm = 0;
+    for (size_t i = 0; i < numPowerLevels - 1 &&
+                       powerLevels[currentTxPowerDBm] < maxTxPowerDBm;
+         i++) {
+      currentTxPowerDBm++;
+    }
+    link.setTxPower(powerLevels[currentTxPowerDBm]);
   }
 }
 
@@ -141,18 +156,17 @@ void LinkManager::updateDynamicPowerManagement() {
   if (Core::NOW() - lastPowerChangeTime > 100 * Core::MILLISECONDS) {
     lastPowerChangeTime = Core::NOW();
 
-    bool updatePower = false;
     if (linkQuality < 80 && currentTxPowerDBm < numPowerLevels - 1 &&
         powerLevels[currentTxPowerDBm + 1] <= maxTxPowerDBm) {
       currentTxPowerDBm++;
-      updatePower = true;
     } else if (linkQuality > 95 && currentTxPowerDBm > 0) {
       currentTxPowerDBm--;
-      updatePower = true;
     }
-    if (updatePower) {
-      link.setTxPower(powerLevels[currentTxPowerDBm]);
+
+    if (currentTxPowerDBm >= numPowerLevels) {
+      currentTxPowerDBm = numPowerLevels - 1;
     }
+    link.setTxPower(powerLevels[currentTxPowerDBm]);
   }
 }
 
