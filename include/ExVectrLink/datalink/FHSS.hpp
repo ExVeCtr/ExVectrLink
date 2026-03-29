@@ -83,12 +83,6 @@ public:
   void setRxSlotIndex(uint8_t index);
   uint8_t getRxSlotIndex() const;
 
-  /// @brief Set the early RX switch offset in nanoseconds.
-  /// The receiving side transitions to RX (and hops if applicable) this much
-  /// before the slot boundary to avoid missing the preamble.
-  void setRxEarlyOffset(int64_t offset);
-  int64_t getRxEarlyOffset() const;
-
   // ===================== Status =====================
 
   FHSSState getFhssState() const;
@@ -131,7 +125,7 @@ private:
   void syncTimer(int64_t receiveStartTime);
   void hopChannel();
 
-  void transmitPacket(const uint8_t *data = nullptr, size_t length = 0);
+  void transmitPacket(network::DataPacket &packet);
   void receivePacket(const network::DataPacket &packet);
 
   void updateLinkQuality();
@@ -142,9 +136,6 @@ private:
 
   int64_t slotInterval = 20 * Core::MILLISECONDS;
   size_t slotsPerHop = 1;
-
-  // How much earlier to advance slot when the next channel is rx.
-  int64_t rxEarlyOffset = 1 * Core::MICROSECONDS;
 
   bool isRxSide = false;
   // After this amount of tx Packets, send an rx Packet. Max 16
@@ -158,14 +149,16 @@ private:
   VCTR::Core::ListArray<uint8_t> channelSequence;
   size_t currentChannelIdx = 0;
   uint8_t key = 0;
+  int64_t lastChannelHopTime = 0;
 
   // ---- Slot state ----
   int64_t currentSlotStart = 0;
   size_t slotCounter = 0;        // Counts from 0 to slotsPerHop
   size_t roleReverseCounter = 0; // Counts from 0 to numTxPacketsToRx
   bool nextSlotIsRoleReversal = false;
-  bool isTransmitSlot =
-      true; // Whether the current slot is a transmit slot (vs receive slot).
+  bool isTransmitSlot = true; // Whether the current slot is a transmit slot
+  bool receivedPacket = false;
+  int64_t lastPacketRcvTime = 0;
 
   Core::IntervalTimer slotTimer;
 

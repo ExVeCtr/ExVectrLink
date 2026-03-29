@@ -17,7 +17,7 @@ namespace VCTR::ExVectrLink::datalink {
 // =============================================================================
 
 FHSS::FHSS(VCTR::network::datalink::RadioI &radioI)
-    : Core::Task_Periodic("FHSS", 1 * Core::MILLISECONDS), radioLink(radioI) {
+    : Core::Task_Periodic("FHSS", 100 * Core::MILLISECONDS), radioLink(radioI) {
   Core::getSystemScheduler().addTask(*this);
 }
 
@@ -52,9 +52,6 @@ void FHSS::setRxSlotIndex(uint8_t index) {
 }
 uint8_t FHSS::getRxSlotIndex() const { return numTxPacketsToRx; }
 
-void FHSS::setRxEarlyOffset(int64_t offset) { rxEarlyOffset = offset; }
-int64_t FHSS::getRxEarlyOffset() const { return rxEarlyOffset; }
-
 // =============================================================================
 // Status getters
 // =============================================================================
@@ -62,10 +59,10 @@ int64_t FHSS::getRxEarlyOffset() const { return rxEarlyOffset; }
 FHSSState FHSS::getFhssState() const { return fhssState; }
 
 float FHSS::getLinkQuality() const {
-  return (float)(isRxSide ? linkQuality : otherEndLinkQuality) * 255.0f;
+  return (float)(isRxSide ? linkQuality : otherEndLinkQuality);
 }
 
-int64_t FHSS::getTimingOffset() const { return timingOffset; }
+int64_t FHSS::getTimingOffset() const { return slotTimer.getTimingOffset(); }
 
 uint8_t FHSS::getSlotCounter() const { return slotCounter; }
 
@@ -83,11 +80,6 @@ bool FHSS::transmitDataframe(const VCTR::network::DataPacket &dataframe) {
   // uint8_t trailerByte2 = ((slotCounter & 0x0F) << 4) | (key & 0x0F);
 
   packetToSend = dataframe;
-  // Append trailer: [PacketType][slotCounter][linkQuality][key]
-  packetToSend.payload.append((uint8_t)PacketType::Data);
-  packetToSend.payload.append(roleReverseCounter);
-  packetToSend.payload.append(linkQuality);
-  packetToSend.payload.append(key);
   return true;
 }
 
@@ -132,26 +124,36 @@ void FHSS::generateChannelSequence(uint8_t key) {
 // =============================================================================
 
 void FHSS::syncTimer(int64_t receiveStartTime) {
-  slotTimer.start(receiveStartTime);
+  if (isRxSide) {
+    if (fhssState == FHSSState::Searching) {
+      slotTimer.start(receiveStartTime);
+    } else {
+      slotTimer.sync(receiveStartTime);
+    }
+  }
+  fhssState = FHSSState::Synced;
+  lastPacketRcvTime = receiveStartTime;
 }
 
 void FHSS::hopChannel() {
   if (channelSequence.size() == 0)
     return;
+  lastChannelHopTime = Core::NOW();
   currentChannelIdx = (currentChannelIdx + 1) % channelSequence.size();
   radioLink.setChannel(channelSequence[currentChannelIdx]);
 }
 
-void FHSS::transmitPacket(const uint8_t *data, size_t length) {
-  network::DataPacket packet;
-  for (size_t i = 0; i < length && data != nullptr; i++) {
-    packet.payload.append(data[i]);
+void FHSS::transmitPacket(network::DataPacket &packet) {
+  int lq = linkQuality * 255.0f;
+  if (lq > 255) {
+    lq = 255;
   }
   packet.payload.append((uint8_t)PacketType::Data);
-  packet.payload.append(roleReverseCounter);
-  packet.payload.append(linkQuality);
-  packet.payload.append(key);
+  packet.payload.append((uint8_t)roleReverseCounter);
+  packet.payload.append((uint8_t)lq);
+  packet.payload.append((uint8_t)key);
   radioLink.transmitDataframe(packet);
+  packet.payload.clear();
 }
 
 void FHSS::receivePacket(const network::DataPacket &packet) {
@@ -171,8 +173,18 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
   if (packetKey != key)
     return;
 
-  // Store the other side's reported link quality.
-  otherEndLinkQuality = recvLinkQuality;
+  // Store values
+  otherEndLinkQuality = (float)recvLinkQuality / 255.0f;
+  receivedPacket = true;
+
+  // Update sync and timing based on received packet.
+  if (isRxSide) {
+    roleReverseCounter = txRoleReverseCounter + 1;
+    if (roleReverseCounter >= numTxPacketsToRx) {
+      roleReverseCounter = 0;
+    }
+  }
+  syncTimer(packet.timestamp);
 
   // Forward data packets to application handlers.
   if (packetType == PacketType::Data && packet.payload.size() > 4) {
@@ -211,9 +223,9 @@ void FHSS::taskInit() {
 void FHSS::taskCheck() {
   int64_t now = Core::NOW();
 
-  // if (slotTimer.needUpdate()) {
-  //   setDeadline(now);
-  // }
+  if (slotTimer.needUpdate()) {
+    setDeadline(now);
+  }
 }
 
 void FHSS::taskThread() {
@@ -229,12 +241,14 @@ void FHSS::taskThread() {
   //   packetToSend.payload.size()); packetToSend.payload.clear();
   // }
 
-  // slotTimer.update(now);
+  slotTimer.update(now);
 
   // --- Searching mode (RX side only) ---
   // In searching mode, slowly hop through channels trying to find a signal.
-  // if (fhssState == FHSSState::Searching) {
-  // }
+  if (fhssState == FHSSState::Synced &&
+      Core::NOW() - lastPacketRcvTime > 10 * slotInterval) {
+    fhssState = FHSSState::Searching;
+  }
 
   // --- Synced mode ---
   // Advance slots as needed. May advance multiple if we fell behind.
@@ -248,8 +262,9 @@ void FHSS::taskThread() {
 
 void FHSS::updateLinkQuality() {
 
-  if (receiveSuccesses.size() == 0) {
+  if (receiveSuccesses.size() < 2) {
     linkQuality = 0;
+    otherEndLinkQuality = 0;
     return;
   }
 
@@ -260,44 +275,44 @@ void FHSS::updateLinkQuality() {
     }
   }
 
-  linkQuality = (float)successCount / (float)receiveSuccesses.size();
+  linkQuality = (float)successCount / (float)receiveSuccesses.size() + 0.1f;
+
+  if (!receiveSuccesses(-1) && receiveSuccesses(-2)) {
+    linkQuality = 0;
+    otherEndLinkQuality = 0;
+  }
+
+  if (Core::NOW() - lastPacketRcvTime > 1 * Core::SECONDS) {
+    otherEndLinkQuality = 0;
+  }
 }
 
 void FHSS::timerEvent(bool isSlotStart) {
   if (isSlotStart) {
 
-    if (packetToSend.payload.size() > 0) {
-      transmitPacket(packetToSend.payload.getPtr(),
-                     packetToSend.payload.size());
-      packetToSend.payload.clear();
+    if (isTransmitSlot) {
+      transmitPacket(packetToSend);
     } else {
-      transmitPacket();
+      receiveSuccesses.placeBack(receivedPacket, true);
     }
 
-    // slotCounter = (slotCounter + 1) % slotsPerHop;
-    // roleReverseCounter = (roleReverseCounter + 1) % numTxPacketsToRx;
+    slotCounter = (slotCounter + 1) % slotsPerHop;
+    roleReverseCounter = (roleReverseCounter + 1) % numTxPacketsToRx;
 
-    // if (isTransmitSlot) {
-    //   if (packetToSend.payload.size() > 0) {
-    //     transmitPacket(packetToSend.payload.getPtr(),
-    //                    packetToSend.payload.size());
-    //     packetToSend.payload.clear();
-    //   } else {
-    //     transmitPacket();
-    //   }
-    // }
-
-    // isTransmitSlot = !isRxSide;
+    isTransmitSlot = !isRxSide;
+    receivedPacket = false;
 
   } else {
 
-    // if (roleReverseCounter == 0) {
-    //   isTransmitSlot = isRxSide && fhssState == FHSSState::Synced;
-    // }
+    if (roleReverseCounter == 0) {
+      isTransmitSlot = isRxSide && fhssState == FHSSState::Synced;
+    }
 
-    // if (slotCounter == 0) {
-    //   // hopChannel();
-    // }
+    if (slotCounter == 0 &&
+        (!isRxSide || fhssState == FHSSState::Synced ||
+         Core::NOW() - lastChannelHopTime > 10 * slotInterval)) {
+      hopChannel();
+    }
   }
 }
 

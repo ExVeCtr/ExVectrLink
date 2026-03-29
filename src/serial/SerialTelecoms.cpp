@@ -85,13 +85,14 @@ void SerialTelecoms::taskThread() {
   }
 
   if (isSerialConnected &&
-      loopStart - lastValidPacketTime > 5000 * Core::MILLISECONDS) {
-    LOG_MSG("Connection timeout. No valid packets received for 5s. Marking as "
-            "disconnected. \n");
+      loopStart - lastValidPacketTime > 500 * Core::MILLISECONDS) {
+    LOG_MSG(
+        "Connection timeout. No valid packets received for 500ms. Marking as "
+        "disconnected. \n");
     isSerialConnected = false;
   }
 
-  if (loopStart - lastHeartbeatTime > 500 * Core::MILLISECONDS) {
+  if (loopStart - lastHeartbeatTime > 100 * Core::MILLISECONDS) {
     lastHeartbeatTime = loopStart;
     sendSerialPacket<SerialPacket_Heartbeat>({isSerialConnected});
   }
