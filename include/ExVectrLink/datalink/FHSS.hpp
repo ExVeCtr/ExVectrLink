@@ -96,6 +96,23 @@ public:
   /// @brief Returns the current slot counter within the hop cycle.
   uint8_t getSlotCounter() const;
 
+  // ===================== Hop Guard =====================
+
+  /// @brief Register a scheduler task to be paused during the hop guard
+  /// window. The task will be automatically paused ~margin before and after
+  /// each frequency hop to protect timing-critical radio operations.
+  void addHopGuardedTask(Core::Scheduler::Task &task);
+
+  /// @brief Remove a previously registered hop-guarded task.
+  void removeHopGuardedTask(Core::Scheduler::Task &task);
+
+  /// @brief Set the hop guard margin in nanoseconds. Guarded tasks are paused
+  /// this long before and after each hop. Default is 2 ms.
+  void setHopGuardMargin(int64_t marginNs);
+
+  /// @brief Returns true if currently within the hop guard window.
+  bool isInHopGuardWindow() const;
+
   // ===================== DatalinkI Interface =====================
 
   bool transmitDataframe(const VCTR::network::DataPacket &dataframe) override;
@@ -155,7 +172,8 @@ private:
   int64_t currentSlotStart = 0;
   size_t slotCounter = 0;        // Counts from 0 to slotsPerHop
   size_t roleReverseCounter = 0; // Counts from 0 to numTxPacketsToRx
-  bool nextSlotIsRoleReversal = false;
+  bool lastSlotWasReceive =
+      false; // Whether the previous slot was an RX slot (for LQ recording)
   bool isTransmitSlot = true; // Whether the current slot is a transmit slot
   bool receivedPacket = false;
   int64_t lastPacketRcvTime = 0;
@@ -164,6 +182,16 @@ private:
 
   // ---- Sync state ----
   FHSSState fhssState = FHSSState::Searching;
+  int64_t slotRxError = 0;
+  Core::ListBuffer<int64_t, 50> syncErrorHistory;
+
+  // ===================== Hop Guard =====================
+
+  void updateHopGuard(int64_t now);
+
+  int64_t hopGuardMargin_ = 2 * Core::MILLISECONDS;
+  bool hopGuardActive_ = false;
+  Core::ListArray<Core::Scheduler::Task *> hopGuardedTasks_;
 
 public:
   int64_t timingOffset = 0;
