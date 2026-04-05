@@ -18,6 +18,7 @@ namespace VCTR::ExVectrLink::datalink {
 
 FHSS::FHSS(VCTR::network::datalink::RadioI &radioI)
     : Core::Task_Periodic("FHSS", 100 * Core::MILLISECONDS), radioLink(radioI) {
+  setPriority(500);
   Core::getSystemScheduler().addTask(*this);
 }
 
@@ -33,13 +34,14 @@ void FHSS::setFhssKey(uint8_t newKey) {
 uint8_t FHSS::getFhssKey() const { return key; }
 void FHSS::setIsRxSide(bool isRxSide) { this->isRxSide = isRxSide; }
 
-void FHSS::setSlotInterval(int64_t interval) {
-  slotInterval = interval;
-  slotTimer.setPeriod(slotInterval);
-}
+void FHSS::setSlotInterval(int64_t interval) { slotInterval = interval; }
 int64_t FHSS::getSlotInterval() const { return slotInterval; }
 
-void FHSS::setSlotsPerHop(uint8_t slots) { slotsPerHop = slots; }
+void FHSS::setSlotsPerHop(uint8_t slots) {
+  if (slots > 16)
+    slots = 16;
+  slotsPerHop = slots;
+}
 uint8_t FHSS::getSlotsPerHop() const { return slotsPerHop; }
 
 void FHSS::setRxSlotIndex(uint8_t index) {
@@ -62,7 +64,11 @@ float FHSS::getLinkQuality() const {
   return (float)(isRxSide ? linkQuality : otherEndLinkQuality);
 }
 
-int64_t FHSS::getTimingOffset() const { return slotTimer.getPhaseOffset(); }
+float FHSS::getSnr() const {
+  return isRxSide ? (float)radioLink.lastPacketSNR() : otherEndSnr;
+}
+
+int64_t FHSS::getTimingOffset() const { return slotTimingOffset; }
 
 uint8_t FHSS::getSlotCounter() const { return slotCounter; }
 
@@ -71,52 +77,7 @@ uint8_t FHSS::getSlotCounter() const { return slotCounter; }
 // =============================================================================
 
 void FHSS::addHopGuardedTask(Core::Scheduler::Task &task) {
-  hopGuardedTasks_.append(&task);
-}
-
-void FHSS::removeHopGuardedTask(Core::Scheduler::Task &task) {
-  for (size_t i = 0; i < hopGuardedTasks_.size(); i++) {
-    if (hopGuardedTasks_[i] == &task) {
-      hopGuardedTasks_.removeAtIndex(i);
-      task.setPaused(false);
-      return;
-    }
-  }
-}
-
-void FHSS::setHopGuardMargin(int64_t marginNs) { hopGuardMargin_ = marginNs; }
-
-bool FHSS::isInHopGuardWindow() const { return hopGuardActive_; }
-
-void FHSS::updateHopGuard(int64_t now) {
-  if (hopGuardedTasks_.size() == 0 || lastChannelHopTime == 0) {
-    return;
-  }
-
-  int64_t hopPeriod = static_cast<int64_t>(slotsPerHop) * slotInterval;
-  if (hopPeriod <= 0) {
-    return;
-  }
-
-  // Compute where we sit inside the current hop cycle.
-  int64_t timeSinceLastHop = now - lastChannelHopTime;
-  if (timeSinceLastHop < 0) {
-    timeSinceLastHop = 0;
-  }
-
-  int64_t cycleTime = timeSinceLastHop % hopPeriod;
-
-  // Guard is active near the edges of the hop cycle (just after a hop
-  // or just before the next one).
-  bool nearHop = (cycleTime <= hopGuardMargin_) ||
-                 (cycleTime >= hopPeriod - hopGuardMargin_);
-
-  if (nearHop != hopGuardActive_) {
-    hopGuardActive_ = nearHop;
-    for (size_t i = 0; i < hopGuardedTasks_.size(); i++) {
-      hopGuardedTasks_[i]->setPaused(nearHop);
-    }
-  }
+  hopGuardedTasks.append(&task);
 }
 
 // =============================================================================
@@ -177,25 +138,28 @@ void FHSS::generateChannelSequence(uint8_t key) {
 // =============================================================================
 
 void FHSS::syncTimer(int64_t receiveStartTime) {
-  // receiveStartTime += 1 * Core::MILLISECONDS;
+  // The TX side schedules transmission 100us into the slot, so subtract that
+  // to estimate the actual slot boundary on the TX side.
+  int64_t estimatedSlotStart = receiveStartTime;
+
+  // Compute phase error: where this packet landed within our slot grid.
+  int64_t slotStartError =
+      (estimatedSlotStart - currentSlotStart) % slotInterval;
+
+  // Wrap to [-slotInterval/2, +slotInterval/2) so the filter converges
+  // correctly regardless of which side of the boundary the error falls on.
+  if (slotStartError > slotInterval / 2)
+    slotStartError -= slotInterval;
+  if (slotStartError < -slotInterval / 2)
+    slotStartError += slotInterval;
+
   if (isRxSide) {
     if (fhssState == FHSSState::Searching) {
-      slotTimer.sync(receiveStartTime);
+      slotTimingOffset = slotStartError;
+      slotOffsetTime = slotTimingOffset;
     } else {
-      // slotTimer.sync(receiveStartTime);
-      auto rawOffset = slotTimer.calcSyncOffset(receiveStartTime);
-      auto currentOffset = slotTimer.getPhaseOffset();
-      auto error = rawOffset - currentOffset;
-      slotRxError = error;
-
-      const auto correctLimit = slotInterval / (linkQuality * 1000 + 1);
-      if (error < -correctLimit) {
-        error = -correctLimit;
-      } else if (error > correctLimit) {
-        error = correctLimit;
-      }
-
-      slotTimer.adjustPhase(error);
+      slotTimingOffset = slotTimingOffset * 0.75 + slotStartError * 0.25;
+      // slotOffsetTime = slotTimingOffset;
     }
   }
   fhssState = FHSSState::Synced;
@@ -207,46 +171,91 @@ void FHSS::hopChannel() {
     return;
   lastChannelHopTime = Core::NOW();
   currentChannelIdx = (currentChannelIdx + 1) % channelSequence.size();
-  radioLink.setChannel(channelSequence[currentChannelIdx]);
+  // radioLink.setChannel(channelSequence[currentChannelIdx]);
 }
 
 void FHSS::transmitPacket(network::DataPacket &packet) {
-  if (!radioLink.isChannelBlocked()) {
-    int lq = linkQuality * 255.0f;
-    if (lq > 255) {
-      lq = 255;
-    }
-    packet.payload.append((uint8_t)roleReverseCounter);
-    packet.payload.append((uint8_t)lq);
-    packet.payload.append((uint8_t)key);
-    radioLink.transmitDataframe(packet);
+  // Pack link quality (upper 4 bits) and SNR (lower 4 bits) into one byte.
+  // LQ:  0-15 maps to 85-100%   (encode: clamp((lq - 0.85) / 0.15 * 15))
+  // SNR: 0-15 maps to -20..+15 dB (encode: clamp((snr + 20) * 15 / 35))
+  int lqEnc = (int)((linkQuality - 0.85f) / 0.15f * 15.0f + 0.5f);
+  if (lqEnc < 0)
+    lqEnc = 0;
+  if (lqEnc > 15)
+    lqEnc = 15;
+
+  int snrRaw = radioLink.lastPacketSNR();
+  int snrEnc = (snrRaw + 20) * 15 / 35;
+  if (snrEnc < 0)
+    snrEnc = 0;
+  if (snrEnc > 15)
+    snrEnc = 15;
+
+  uint8_t lqSnrByte = ((uint8_t)lqEnc << 4) | (uint8_t)snrEnc;
+
+  auto slotCountBuf = (slotCounter + 1) % slotsPerHop;
+  auto roleReverseBuf = (roleReverseCounter + 1) % numTxPacketsToRx;
+
+  // Pack slotCounter (upper nibble) and roleReverseCounter (lower nibble)
+  // into one byte.  Both fit in 4 bits (max 16 each).
+  uint8_t slotRoleByte =
+      ((uint8_t)(slotCountBuf & 0x0F) << 4) | (uint8_t)(roleReverseBuf & 0x0F);
+
+  packet.payload.append(slotRoleByte);
+  packet.payload.append(lqSnrByte);
+
+  auto crc = key;
+  for (size_t i = 0; i < packet.payload.size(); i++) {
+    crc ^= packet.payload[i];
   }
+
+  packet.payload.append((uint8_t)crc);
+  radioLink.transmitDataframe(packet);
   packet.payload.clear();
 }
 
 void FHSS::receivePacket(const network::DataPacket &packet) {
   // return;
-  if (packet.payload.size() < 3)
+  if (packet.payload.size() < 3) {
     return;
+  }
 
   size_t payloadEnd = packet.payload.size();
 
   // Read trailer (appended at the end).
   auto packetKey = packet.payload[payloadEnd - 1];
-  auto recvLinkQuality = packet.payload[payloadEnd - 2];
-  auto txRoleReverseCounter = packet.payload[payloadEnd - 3];
+  auto lqSnrByte = packet.payload[payloadEnd - 2];
+  auto slotRoleByte = packet.payload[payloadEnd - 3];
 
-  // Validate key.
-  if (packetKey != key)
+  auto crc = key;
+  for (size_t i = 0; i < payloadEnd - 1; i++) {
+    crc ^= packet.payload[i];
+  }
+  // Check CRC and Key simultaneously:
+  if (crc != packetKey) {
     return;
+  }
 
-  // Store values
-  otherEndLinkQuality = (float)recvLinkQuality / 255.0f;
+  // Unpack slotCounter (upper nibble) and roleReverseCounter (lower nibble).
+  uint8_t txSlotCounter = (slotRoleByte >> 4) & 0x0F;
+  uint8_t txRoleReverseCounter = slotRoleByte & 0x0F;
+
+  // Decode packed LQ (upper 4 bits) and SNR (lower 4 bits).
+  // LQ:  0-15 → 85-100%     (decode: 0.85 + nibble * 0.15 / 15)
+  // SNR: 0-15 → -20..+15 dB (decode: nibble * 35 / 15 - 20)
+  uint8_t lqNibble = (lqSnrByte >> 4) & 0x0F;
+  uint8_t snrNibble = lqSnrByte & 0x0F;
+  otherEndLinkQuality = 0.85f + (float)lqNibble * 0.01f;
+  otherEndSnr = (float)snrNibble * 35.0f / 15.0f - 20.0f;
   receivedPacket = true;
 
-  // Resync role-reversal counter to match the TX side.
+  // Serial.printf("Received packet with LQ %.2f and SNR %.1f dB\n",
+  //               otherEndLinkQuality, otherEndSnr);
+
+  // Resync role-reversal counter and slot counter to match the TX side.
   if (isRxSide) {
     roleReverseCounter = txRoleReverseCounter;
+    // slotCounter = txSlotCounter;
   }
   syncTimer(packet.timestamp);
 
@@ -276,59 +285,34 @@ void FHSS::taskInit() {
     radioLink.setChannel(channelSequence[0]);
   }
 
-  slotTimer.start();
-  slotTimer.setPeriod(slotInterval);
-  slotTimer.setDutyCycleRatio(0.5f);
-  // slotTimer.setHighTime(
-  //     slotInterval -
-  //     1 * Core::MILLISECONDS);
-  // FireAll ensures that if a scheduler delay causes us to miss one or more
-  // full cycles, every skipped edge is replayed in order.  This keeps
-  // slotCounter / roleReverseCounter synchronised with the actual elapsed
-  // time rather than silently dropping increments.
-  slotTimer.setMissPolicy(Core::MissPolicy::FireAll);
-  slotTimer.setCallback([this](Core::EdgeType edge) {
-    timerEvent(edge == Core::EdgeType::Rising);
-  });
+  currentSlotStart = Core::NOW();
 }
 
 void FHSS::taskCheck() {
-  int64_t now = Core::NOW();
 
-  updateHopGuard(now);
-
-  if (slotTimer.needUpdate()) {
-    setDeadline(now);
-  }
+  // if (slotFinalQuart &&
+  //     Core::NOW() - currentSlotStart >= getAdjustedSlotInterval()) {
+  //   setDeadline(Core::NOW());
+  // } else if (slotFirstQuart &&
+  //            Core::NOW() - currentSlotStart >= slotGuardMargin) {
+  //   setDeadline(Core::NOW());
+  // } else if (Core::NOW() - currentSlotStart >= getAdjustedSlotInterval()) {
+  //   setDeadline(Core::NOW());
+  // }
 }
 
 void FHSS::taskThread() {
-  int64_t now = Core::NOW();
+  threadStart = Core::NOW();
 
-  // TX side is always synced.
-  // if (!isRxSide && fhssState != FHSSState::Synced) {
-  //   fhssState = FHSSState::Synced;
-  // }
-
-  // if (packetToSend.payload.size() > 0) {
-  //   transmitPacket(packetToSend.payload.getPtr(),
-  //   packetToSend.payload.size()); packetToSend.payload.clear();
-  // }
-
-  slotTimer.update(now);
+  timingControl();
 
   // --- Searching mode (RX side only) ---
   // In searching mode, slowly hop through channels trying to find a signal.
   if (isRxSide && fhssState == FHSSState::Synced &&
-      Core::NOW() - lastPacketRcvTime > 1 * Core::SECONDS) {
+      Core::NOW() - lastPacketRcvTime > 3 * Core::SECONDS) {
     fhssState = FHSSState::Searching;
+    receiveSuccesses.clear();
   }
-
-  // --- Synced mode ---
-  // Advance slots as needed. May advance multiple if we fell behind.
-  // if (fhssState == FHSSState::Synced) {
-  //   slotTimer.update(now);
-  // }
 
   // Update link quality stats.
   updateLinkQuality();
@@ -351,7 +335,7 @@ void FHSS::updateLinkQuality() {
 
   linkQuality = (float)successCount / (float)receiveSuccesses.size();
 
-  if (!receiveSuccesses(-1) && receiveSuccesses(-2)) {
+  if (!receiveSuccesses(-1) && !receiveSuccesses(-2)) {
     // linkQuality = 0;
     // otherEndLinkQuality = 0;
   }
@@ -361,51 +345,114 @@ void FHSS::updateLinkQuality() {
   }
 }
 
-void FHSS::timerEvent(bool isSlotStart) {
-  if (isSlotStart) {
+void FHSS::timingControl() {
+  // setDeadline(Core::NOW());
 
-    // ── 1. Record result of the PREVIOUS slot ──
-    // Use lastSlotWasReceive (set on the previous rising edge) to decide
-    // whether the previous slot was an actual RX slot whose result should
-    // be tracked.  This is decoupled from isTransmitSlot which reflects
-    // the role of the slot that is about to START.
-    if (lastSlotWasReceive) {
-      receiveSuccesses.placeBack(receivedPacket, true);
-      syncErrorHistory.placeBack(slotRxError == 0 ? slotInterval : slotRxError,
-                                 true);
-      slotRxError = 0;
+  switch (slotPhase) {
+  case SlotPhase::Start: {
+    slotPhase = SlotPhase::Idle;
+
+    // if (Core::NOW() > currentSlotStart + getAdjustedSlotInterval()*1.1) {
+    //   Serial.printf("Warning: FHSS slot overrun! Now: %.3f, currentSlotStart:
+    //   %.3f, interval: %.3f\n",
+    //                 (double)Core::NOW() / Core::SECONDS,
+    //                 (double)currentSlotStart / Core::SECONDS,
+    //                 (double)getAdjustedSlotInterval() / Core::SECONDS);
+    // }
+
+    currentSlotStart += getAdjustedSlotInterval();
+    trueSlotInterval =
+        slotInterval + (receivedPacket ? slotTimingOffset * 0.005 : 0);
+
+    // If we've fallen behind real time (e.g. due to higher-priority tasks
+    // delaying us), skip forward instead of rapidly replaying every missed
+    // slot.  This prevents a tight catch-up loop that floods the radio with
+    // back-to-back scheduling attempts.
+    int64_t now = Core::NOW();
+    int64_t interval = getAdjustedSlotInterval();
+    if (currentSlotStart + interval < now) {
+      int64_t missed = (now - currentSlotStart) / interval;
+      currentSlotStart += missed * interval;
+      slotCounter = (slotCounter + missed) % slotsPerHop;
+      roleReverseCounter = (roleReverseCounter + missed) % numTxPacketsToRx;
     }
 
-    // ── 2. Advance counters ──
+    auto nextRun = currentSlotStart + slotGuardMargin;
+    setDeadline(nextRun);
+    setRelease(nextRun);
+
+    if (lastSlotWasReceive) {
+      receiveSuccesses.placeBack(receivedPacket, true);
+    }
+
     slotCounter = (slotCounter + 1) % slotsPerHop;
     roleReverseCounter = (roleReverseCounter + 1) % numTxPacketsToRx;
 
-    // ── 3. Execute this slot's role and track it for next recording ──
-    // The transmitted packet carries the already-incremented counters so
-    // the RX side can simply copy them without needing a +1 adjustment.
-    if (isTransmitSlot) {
-      transmitPacket(packetToSend);
-      lastSlotWasReceive = false;
-    } else {
-      lastSlotWasReceive = true;
-    }
+    lastSlotWasReceive =
+        isRxSide ? roleReverseCounter != 0 : roleReverseCounter == 0;
 
-    // ── 4. Prepare defaults for next slot ──
-    isTransmitSlot = !isRxSide;
     receivedPacket = false;
 
-  } else {
+    break;
+  }
 
-    if (roleReverseCounter == 0) {
-      isTransmitSlot =
-          isRxSide && (fhssState == FHSSState::Synced || !isRxSide);
+  case SlotPhase::Idle: {
+    slotPhase = SlotPhase::Scheduling;
+    auto nextRun =
+        currentSlotStart + getAdjustedSlotInterval() - slotGuardMargin;
+    setDeadline(nextRun);
+    setRelease(nextRun);
+
+    if (!isRxSide || fhssState == FHSSState::Synced) {
+      if (slotCounter == 0) {
+        hopChannel();
+      }
+    } else if (fhssState == FHSSState::Searching) {
+      if (threadStart - lastSearchHopTime >=
+          slotInterval * radioLink.getNumChannels()) {
+        lastSearchHopTime = threadStart;
+        hopChannel();
+      }
     }
 
-    if (slotCounter == 0 && (!isRxSide || fhssState == FHSSState::Synced ||
-                             Core::NOW() - lastChannelHopTime >
-                                 slotInterval * channelSequence.size())) {
-      hopChannel();
+    setGuardedTasks(false);
+
+    break;
+  }
+
+  case SlotPhase::Scheduling: {
+    slotPhase = SlotPhase::Start;
+    auto nextRun = currentSlotStart + getAdjustedSlotInterval();
+    setDeadline(nextRun);
+    setRelease(nextRun);
+
+    bool nextSlotTx = isRxSide ? roleReverseCounter + 1 == numTxPacketsToRx
+                               : roleReverseCounter + 1 != numTxPacketsToRx;
+    bool allowedToTx = !isRxSide || fhssState == FHSSState::Synced;
+    bool blocked = radioLink.isChannelBlocked();
+    if (nextSlotTx && allowedToTx && !blocked) {
+      lastTxPrint = threadStart;
+      int64_t txTime = currentSlotStart + getAdjustedSlotInterval();
+      packetToSend.timestamp = txTime;
+      // Serial.printf(
+      //     "Scheduling packet for transmission at %.4f (dT: %.3f ms)\n",
+      //     (double)txTime / Core::SECONDS,
+      //     (double)(txTime - Core::NOW()) / Core::MILLISECONDS);
+      transmitPacket(packetToSend);
     }
+
+    setGuardedTasks(true);
+
+    break;
+  }
+  }
+}
+
+int64_t FHSS::getAdjustedSlotInterval() const { return trueSlotInterval; }
+
+void FHSS::setGuardedTasks(bool paused) {
+  for (size_t i = 0; i < hopGuardedTasks.size(); i++) {
+    hopGuardedTasks[i]->setPaused(paused);
   }
 }
 

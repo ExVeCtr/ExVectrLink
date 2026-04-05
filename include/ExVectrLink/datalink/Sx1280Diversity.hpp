@@ -57,9 +57,11 @@ public:
   size_t getCurrentChannel() const override;
   void setChannel(size_t channel) override;
 
+  int16_t lastPacketSNR() const override;
+
 private:
   void startReceiveOnAllLinks();
-  void stopReceiveOnAllLinks();
+  void stopReceiveOnAllLinks(size_t exceptIndex = -1);
 
   void determineBestLink();
 
@@ -70,9 +72,7 @@ private:
   size_t currentBestLinkIndex = 0;
   uint8_t currentBestLinkLq = 0;
 
-  uint8_t lastReceivedPacketId = 0;
-
-  bool transmitting = false;
+  int64_t transmitting = 0;
   bool receiving = false;
 };
 

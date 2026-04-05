@@ -89,6 +89,7 @@ public:
 
   /// @brief Returns link quality as 0.0 (no link) to 1.0 (perfect).
   float getLinkQuality() const;
+  float getSnr() const;
 
   /// @brief Returns the current timing offset correction in nanoseconds.
   int64_t getTimingOffset() const;
@@ -147,11 +148,14 @@ private:
 
   void updateLinkQuality();
 
-  void timerEvent(bool isSlotStart);
+  void timingControl();
+
+  int64_t getAdjustedSlotInterval() const;
 
   // ======================= Configuration =======================
 
-  int64_t slotInterval = 20 * Core::MILLISECONDS;
+  int64_t slotInterval = 10 * Core::MILLISECONDS;
+  int64_t trueSlotInterval = slotInterval;
   size_t slotsPerHop = 1;
 
   bool isRxSide = false;
@@ -168,41 +172,49 @@ private:
   uint8_t key = 0;
   int64_t lastChannelHopTime = 0;
 
+  // ----- Timing -----
+  enum class SlotPhase {
+    Start,
+    Idle,
+    Scheduling,
+  };
+  int64_t threadStart = 0;
+  // bool slotFirstQuart = false;
+  // bool slotFinalQuart = false;
+  SlotPhase slotPhase = SlotPhase::Start;
+  bool slotTxDone = false;
+
   // ---- Slot state ----
   int64_t currentSlotStart = 0;
+  int64_t slotTimingOffset = 0;
+  int64_t slotOffsetTime = 0;
   size_t slotCounter = 0;        // Counts from 0 to slotsPerHop
   size_t roleReverseCounter = 0; // Counts from 0 to numTxPacketsToRx
-  bool lastSlotWasReceive =
-      false; // Whether the previous slot was an RX slot (for LQ recording)
-  bool isTransmitSlot = true; // Whether the current slot is a transmit slot
+  bool lastSlotWasReceive = false;
   bool receivedPacket = false;
   int64_t lastPacketRcvTime = 0;
 
-  Core::IntervalTimer slotTimer;
-
   // ---- Sync state ----
   FHSSState fhssState = FHSSState::Searching;
-  int64_t slotRxError = 0;
-  Core::ListBuffer<int64_t, 50> syncErrorHistory;
+  int64_t lastSearchHopTime = 0;
 
-  // ===================== Hop Guard =====================
+  int64_t lastTxPrint = 0;
 
-  void updateHopGuard(int64_t now);
-
-  int64_t hopGuardMargin_ = 2 * Core::MILLISECONDS;
+  // ===================== Slot Guard =====================
+  int64_t slotGuardMargin = 2 * Core::MILLISECONDS;
   bool hopGuardActive_ = false;
-  Core::ListArray<Core::Scheduler::Task *> hopGuardedTasks_;
+  Core::ListArray<Core::Scheduler::Task *> hopGuardedTasks;
 
-public:
-  int64_t timingOffset = 0;
+  void setGuardedTasks(bool paused);
 
   // ---- Packet data ----
   VCTR::network::DataPacket packetToSend;
 
   // ---- Link quality tracking ----
-  VCTR::Core::ListBuffer<bool, 50> receiveSuccesses;
+  VCTR::Core::ListBuffer<bool, 100> receiveSuccesses;
   float linkQuality = 0;
   float otherEndLinkQuality = 0;
+  float otherEndSnr = 0;
 };
 
 } // namespace VCTR::ExVectrLink::datalink

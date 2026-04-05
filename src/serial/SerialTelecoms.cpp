@@ -60,19 +60,39 @@ void SerialTelecoms::taskCheck() {
 void SerialTelecoms::taskThread() {
   int64_t loopStart = Core::NOW();
 
-  while (serialPort.readable() > 0 &&
-         Core::NOW() - loopStart < 0.5 * Core::MILLISECONDS) {
-    lastSerialByteTime = loopStart;
-    uint8_t incomingByte;
-    serialPort.readByte(incomingByte);
-    decodeSerialByte(incomingByte);
+  // Bulk read incoming serial data
+  const auto bufferSize = 10;
+  {
+    uint8_t readBuffer[bufferSize];
+    size_t available;
+    while ((available = serialPort.readable()) > 0 &&
+           Core::NOW() - loopStart < 1 * Core::MILLISECONDS) {
+      lastSerialByteTime = loopStart;
+      size_t toRead =
+          available < sizeof(readBuffer) ? available : sizeof(readBuffer);
+      size_t bytesRead = serialPort.readData(readBuffer, toRead);
+      for (size_t i = 0; i < bytesRead; i++) {
+        decodeSerialByte(readBuffer[i]);
+      }
+    }
   }
 
-  while (sendDataBuffer.size() > 0 &&
-         Core::NOW() - loopStart < 0.5 * Core::MILLISECONDS) {
-    uint8_t byteToSend;
-    sendDataBuffer.takeFront(byteToSend);
-    serialPort.writeByte(byteToSend);
+  // Bulk write outgoing serial data
+  {
+    uint8_t writeBuffer[bufferSize];
+    while (sendDataBuffer.size() > 0 &&
+           Core::NOW() - loopStart < 1 * Core::MILLISECONDS) {
+      size_t toSend = sendDataBuffer.size();
+      size_t chunkSize =
+          toSend < sizeof(writeBuffer) ? toSend : sizeof(writeBuffer);
+      for (size_t i = 0; i < chunkSize; i++) {
+        writeBuffer[i] = sendDataBuffer[i];
+      }
+      size_t bytesWritten = serialPort.writeData(writeBuffer, chunkSize);
+      if (bytesWritten == 0)
+        break;
+      sendDataBuffer.removeFront(bytesWritten);
+    }
   }
 
   if (lastSerialByteTime != lastLoopTime && baudrate != standardBaudrate &&
@@ -144,10 +164,18 @@ bool SerialTelecoms::isOtherEndConnected() const {
 
 void SerialTelecoms::forcePacketSendNow(int64_t timeout) {
   auto start = Core::NOW();
+  uint8_t writeBuffer[256];
   while (sendDataBuffer.size() > 0 && Core::NOW() - start < timeout) {
-    uint8_t byteToSend;
-    sendDataBuffer.takeFront(byteToSend);
-    serialPort.writeByte(byteToSend);
+    size_t toSend = sendDataBuffer.size();
+    size_t chunkSize =
+        toSend < sizeof(writeBuffer) ? toSend : sizeof(writeBuffer);
+    for (size_t i = 0; i < chunkSize; i++) {
+      writeBuffer[i] = sendDataBuffer[i];
+    }
+    size_t bytesWritten = serialPort.writeData(writeBuffer, chunkSize);
+    if (bytesWritten == 0)
+      break;
+    sendDataBuffer.removeFront(bytesWritten);
   }
 }
 
