@@ -13,6 +13,7 @@ namespace VCTR::ExVectrLink::datalink {
 
 enum class FHSSState : uint8_t {
   Searching, ///< Not synced, scanning channels to find a signal.
+  Syncing,   ///< Detected a signal and is adjusting timing to sync.
   Synced,    ///< Synced with the other side, normal operation.
 };
 
@@ -154,9 +155,9 @@ private:
 
   // ======================= Configuration =======================
 
-  int64_t slotInterval = 10 * Core::MILLISECONDS;
+  int64_t slotInterval = 12 * Core::MILLISECONDS;
   int64_t trueSlotInterval = slotInterval;
-  size_t slotsPerHop = 1;
+  size_t slotsPerHop = 4;
 
   bool isRxSide = false;
   // After this amount of tx Packets, send an rx Packet. Max 16
@@ -179,8 +180,6 @@ private:
     Scheduling,
   };
   int64_t threadStart = 0;
-  // bool slotFirstQuart = false;
-  // bool slotFinalQuart = false;
   SlotPhase slotPhase = SlotPhase::Start;
   bool slotTxDone = false;
 
