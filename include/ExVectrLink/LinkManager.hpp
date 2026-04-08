@@ -18,7 +18,7 @@ namespace VCTR::ExVectrLink /* ExVectrLinkI */ {
 class LinkManager : public Core::Task_Periodic,
                     public network::datalink::DatalinkI {
 
-  static constexpr uint8_t powerLevels[] = {12, 20, 24, 27, 33};
+  static constexpr uint8_t powerLevels[] = {7, 10, 12, 20, 24, 27, 33};
   static constexpr size_t numPowerLevels =
       sizeof(powerLevels) / sizeof(powerLevels[0]);
 
@@ -39,6 +39,7 @@ public:
 
   void enableFhss(bool enable);
 
+  void setMinTxPower(uint8_t minDBm);
   void setMaxTxPower(uint8_t maxDBm);
   uint8_t getCurrentTxPower() const;
 
@@ -46,8 +47,8 @@ public:
 
   // Returns a value from 0-100 with 100 being the best quality.
   uint8_t getLinkQuality() const;
-  uint8_t getLinkRSSI() const;
-  uint8_t getLinkSNR() const;
+  int8_t getLinkRSSI() const;
+  int8_t getLinkSNR() const;
   uint8_t getLinkAntenna() const;
 
   void startBinding();
@@ -72,6 +73,7 @@ private:
   VCTR::ExVectrLink::ExVectrLinkI &link;
   uint8_t mak;
 
+  uint8_t minTxPowerDBm = 7;
   uint8_t maxTxPowerDBm = 10;
   uint8_t currentTxPowerDBm = 0;
 
@@ -84,6 +86,8 @@ private:
   bool failsafe = false;
 
   uint8_t linkQuality = 0;
+  int8_t linkSnr = -100;
+  int8_t linkRssi = -127;
 
   int64_t lastPacketTime = 0;
   int64_t failsafeTimeout = 1000 * Core::MILLISECONDS;

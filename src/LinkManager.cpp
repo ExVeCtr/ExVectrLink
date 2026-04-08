@@ -69,6 +69,8 @@ void LinkManager::enableFhss(bool enable) {
   link.setEnableFhss(enable, fhssSequenceKey);
 }
 
+void LinkManager::setMinTxPower(uint8_t minDBm) { minTxPowerDBm = minDBm; }
+
 void LinkManager::setMaxTxPower(uint8_t maxDBm) { maxTxPowerDBm = maxDBm; }
 
 uint8_t LinkManager::getCurrentTxPower() const {
@@ -79,9 +81,9 @@ bool LinkManager::isFailsafe() const { return failsafe; }
 
 uint8_t LinkManager::getLinkQuality() const { return linkQuality; }
 
-uint8_t LinkManager::getLinkRSSI() const { return link.getLinkInfo().rssi; }
+int8_t LinkManager::getLinkRSSI() const { return linkRssi; }
 
-uint8_t LinkManager::getLinkSNR() const { return link.getLinkInfo().snr; }
+int8_t LinkManager::getLinkSNR() const { return linkSnr; }
 
 uint8_t LinkManager::getLinkAntenna() const {
   return link.getLinkInfo().antenna;
@@ -153,14 +155,18 @@ void LinkManager::updateFailsafeState() {
 }
 
 void LinkManager::updateDynamicPowerManagement() {
-  if (Core::NOW() - lastPowerChangeTime > 100 * Core::MILLISECONDS) {
-    lastPowerChangeTime = Core::NOW();
+  if (Core::NOW() - lastPowerChangeTime > 0) {
+    lastPowerChangeTime = Core::NOW() + 10 * Core::MILLISECONDS;
 
-    if (linkQuality < 80 && currentTxPowerDBm < numPowerLevels - 1 &&
+    if ((linkQuality < 85 || linkSnr < -2) &&
+        currentTxPowerDBm < numPowerLevels - 1 &&
         powerLevels[currentTxPowerDBm + 1] <= maxTxPowerDBm) {
       currentTxPowerDBm++;
-    } else if (linkQuality > 95 && currentTxPowerDBm > 0) {
+      lastPowerChangeTime = Core::NOW() + 100 * Core::MILLISECONDS;
+    } else if (linkQuality > 95 && currentTxPowerDBm > 0 && linkSnr > 2 &&
+               powerLevels[currentTxPowerDBm - 1] > minTxPowerDBm) {
       currentTxPowerDBm--;
+      lastPowerChangeTime = Core::NOW() + 500 * Core::MILLISECONDS;
     }
 
     if (currentTxPowerDBm >= numPowerLevels) {
@@ -173,7 +179,10 @@ void LinkManager::updateDynamicPowerManagement() {
 void LinkManager::updateBindingState() {}
 
 void LinkManager::updateLinkQualityMetrics() {
-  linkQuality = 100 - link.getLinkInfo().lossRate;
+  const auto &linkInfo = link.getLinkInfo();
+  linkQuality = 100 - linkInfo.lossRate;
+  linkSnr = linkInfo.snr;
+  linkRssi = linkInfo.rssi;
 }
 
 } // namespace VCTR::ExVectrLink
