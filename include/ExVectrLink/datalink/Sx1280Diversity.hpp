@@ -36,6 +36,13 @@ public:
 
   size_t getCurrentBestLinkIndex() const;
 
+  /**
+   * @brief Use only the given link for tx. Rx will uise any.
+   * @return true if the lgiven link is in the diversity and has been set.
+   */
+  bool
+  setDesignatedTxLink(const VCTR::network::datalink::Datalink_SX1280_V2 &link);
+
   //--- DatalinkI interface implementation ---
 
   bool transmitDataframe(const VCTR::network::DataPacket &dataframe) override;
@@ -59,15 +66,22 @@ public:
 
   int16_t lastPacketSNR() const override;
 
+  void setStartReceive(bool rxEnabled) override;
+  void setEnableTxRx(bool enable) override;
+  void setEnableAutoRx(bool enableAutoRx) override;
+
 private:
   void startReceiveOnAllLinks();
   void stopReceiveOnAllLinks(size_t exceptIndex = -1);
-
   void determineBestLink();
+
+  size_t getTxLinkIndex() const;
 
   Core::ListArray<Sx1280LinkInfo> diversityLinks;
 
   int64_t lastPacketReceivedTime = 0;
+
+  size_t designatedTxLink = -1;
 
   size_t currentBestLinkIndex = 0;
   uint8_t currentBestLinkLq = 0;

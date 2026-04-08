@@ -142,7 +142,7 @@ private:
   void generateChannelSequence(uint8_t key);
 
   void syncTimer(int64_t receiveStartTime);
-  void hopChannel();
+  void hopChannel(bool reverse = false);
 
   void transmitPacket(network::DataPacket &packet);
   void receivePacket(const network::DataPacket &packet);
@@ -155,7 +155,7 @@ private:
 
   // ======================= Configuration =======================
 
-  int64_t slotInterval = 12 * Core::MILLISECONDS;
+  int64_t slotInterval = 10 * Core::MILLISECONDS;
   int64_t trueSlotInterval = slotInterval;
   size_t slotsPerHop = 4;
 

@@ -140,7 +140,7 @@ void FHSS::generateChannelSequence(uint8_t key) {
 void FHSS::syncTimer(int64_t receiveStartTime) {
   // The TX side schedules transmission 100us into the slot, so subtract that
   // to estimate the actual slot boundary on the TX side.
-  int64_t estimatedSlotStart = receiveStartTime;
+  int64_t estimatedSlotStart = receiveStartTime; // - 100 * Core::MICROSECONDS;
 
   // Compute phase error: where this packet landed within our slot grid.
   int64_t slotStartError =
@@ -161,24 +161,32 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
 
     } else if (fhssState == FHSSState::Syncing) {
       slotTimingOffset = slotStartError;
-      slotOffsetTime = slotOffsetTime * 0.75 + slotStartError * 0.25;
+      slotOffsetTime = slotOffsetTime * 0.9 + slotStartError * 0.1;
 
-      if (linkQuality > 0.9f) {
+      if (linkQuality > 0.75f) {
         fhssState = FHSSState::Synced;
       }
 
     } else {
-      slotTimingOffset = slotTimingOffset * 0.9 + slotStartError * 0.1;
+      slotTimingOffset = slotTimingOffset * 0.75 + slotStartError * 0.25;
+      slotOffsetTime = slotOffsetTime * 0.98 + slotStartError * 0.02;
     }
   }
   lastPacketRcvTime = receiveStartTime;
 }
 
-void FHSS::hopChannel() {
+void FHSS::hopChannel(bool reverse) {
   if (channelSequence.size() == 0)
     return;
   lastChannelHopTime = Core::NOW();
-  currentChannelIdx = (currentChannelIdx + 1) % channelSequence.size();
+  if (reverse) {
+    if (currentChannelIdx == 0) {
+      currentChannelIdx = channelSequence.size();
+    }
+    currentChannelIdx--;
+  } else {
+    currentChannelIdx = (currentChannelIdx + 1) % channelSequence.size();
+  }
   radioLink.setChannel(channelSequence[currentChannelIdx]);
 }
 
@@ -268,6 +276,7 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
   if (isRxSide && fhssState != FHSSState::Synced) {
     roleReverseCounter = txRoleReverseCounter;
     slotCounter = (txSlotCounter + 1) % slotsPerHop;
+    // slotCounter = txSlotCounter;
   }
   syncTimer(packet.timestamp);
 
@@ -297,6 +306,8 @@ void FHSS::taskInit() {
     radioLink.setChannel(channelSequence[0]);
   }
 
+  radioLink.setEnableAutoRx(false);
+
   currentSlotStart = Core::NOW();
 }
 
@@ -321,13 +332,22 @@ void FHSS::taskThread() {
   // --- Searching mode (RX side only) ---
   // In searching mode, slowly hop through channels trying to find a signal.
   if (isRxSide && fhssState == FHSSState::Synced &&
-      Core::NOW() - lastPacketRcvTime > 5 * Core::SECONDS) {
+      Core::NOW() - lastPacketRcvTime > 2 * Core::SECONDS) {
     fhssState = FHSSState::Searching;
     receiveSuccesses.clear();
   } else if (isRxSide && fhssState == FHSSState::Syncing &&
              Core::NOW() - lastPacketRcvTime > 0.5 * Core::SECONDS) {
     fhssState = FHSSState::Searching;
     receiveSuccesses.clear();
+  } else if (linkQuality < 0.1f && fhssState == FHSSState::Synced) {
+    fhssState = FHSSState::Syncing;
+  }
+
+  // --- Sync Info for tx side ---
+  if (!isRxSide) {
+    fhssState = (Core::NOW() - lastPacketRcvTime > 1 * Core::SECONDS)
+                    ? FHSSState::Searching
+                    : FHSSState::Synced;
   }
 
   // Update link quality stats.
@@ -370,7 +390,10 @@ void FHSS::timingControl() {
 
     currentSlotStart += getAdjustedSlotInterval();
     trueSlotInterval =
-        slotInterval + (receivedPacket ? slotTimingOffset * 0.005 : 0);
+        slotInterval +
+        (receivedPacket && fhssState != FHSSState::Searching
+             ? slotTimingOffset * (fhssState == FHSSState::Synced ? 0.005 : 0.2)
+             : 0);
 
     // If we've fallen behind real time (e.g. due to higher-priority tasks
     // delaying us), skip forward instead of rapidly replaying every missed
@@ -445,17 +468,16 @@ void FHSS::timingControl() {
     //
     // Both sides: the next TX is prepared in Scheduling (+10ms), AFTER
     //   the freq change is applied, so it goes on the new channel.
-    if (isRxSide && fhssState == FHSSState::Searching) {
-      if (threadStart - lastSearchHopTime >=
-          slotInterval * radioLink.getNumChannels()) {
-        lastSearchHopTime = threadStart;
-        hopChannel();
-      }
-    } else {
-      if (slotCounter == 0) {
-        hopChannel();
-      }
-    }
+    // if (isRxSide && fhssState == FHSSState::Searching) {
+    //   if (threadStart - lastSearchHopTime >= slotInterval * 2) {
+    //     lastSearchHopTime = threadStart;
+    //     hopChannel(true);
+    //   }
+    // } else {
+    //   if (slotCounter == 0) {
+    //     hopChannel();
+    //   }
+    // }
 
     setGuardedTasks(false);
 
@@ -467,6 +489,17 @@ void FHSS::timingControl() {
     auto nextRun = currentSlotStart + getAdjustedSlotInterval();
     setDeadline(nextRun);
     setRelease(nextRun);
+
+    if (isRxSide && fhssState == FHSSState::Searching) {
+      if (threadStart - lastSearchHopTime >= slotInterval * 2) {
+        lastSearchHopTime = threadStart;
+        hopChannel(true);
+      }
+    } else {
+      if (slotCounter == 0) {
+        hopChannel();
+      }
+    }
 
     bool nextSlotTx = isRxSide ? roleReverseCounter + 1 == numTxPacketsToRx
                                : roleReverseCounter + 1 != numTxPacketsToRx;
@@ -482,6 +515,8 @@ void FHSS::timingControl() {
       //     (double)txTime / Core::SECONDS,
       //     (double)(txTime - Core::NOW()) / Core::MILLISECONDS);
       transmitPacket(packetToSend);
+    } else {
+      radioLink.setStartReceive(true);
     }
 
     setGuardedTasks(true);

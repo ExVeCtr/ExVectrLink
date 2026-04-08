@@ -27,10 +27,10 @@ void Sx1280Diversity::addDiversityLink(
     VCTR::network::datalink::Datalink_SX1280_V2 &link) {
   auto linkIndex = diversityLinks.size();
   diversityLinks.append({&link, {0, 0}});
-  link.addTransmitFinishedHandler([this]() {
-    transmitting = 0;
-    startReceiveOnAllLinks();
-  });
+  // link.addTransmitFinishedHandler([this]() {
+  //   transmitting = 0;
+  //   startReceiveOnAllLinks();
+  // });
   link.addReceiveHandler(
       [this, linkIndex](const VCTR::network::DataPacket &dataframe) {
         auto time = Core::NOW();
@@ -60,15 +60,34 @@ size_t Sx1280Diversity::getCurrentBestLinkIndex() const {
   return currentBestLinkIndex;
 }
 
+bool Sx1280Diversity::setDesignatedTxLink(
+    const VCTR::network::datalink::Datalink_SX1280_V2 &link) {
+
+  for (size_t i = 0; i < diversityLinks.size(); i++) {
+    if (diversityLinks[i].link == &link) {
+      designatedTxLink = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+size_t Sx1280Diversity::getTxLinkIndex() const {
+  return (designatedTxLink != (size_t)-1) ? designatedTxLink
+                                          : currentBestLinkIndex;
+}
+
 bool Sx1280Diversity::transmitDataframe(
     const VCTR::network::DataPacket &dataframe) {
   if (diversityLinks.size() == 0) {
     return false;
   }
 
-  auto &bestLink = diversityLinks[currentBestLinkIndex];
-  stopReceiveOnAllLinks(currentBestLinkIndex);
-  bool result = bestLink.link->transmitDataframe(dataframe);
+  auto txLinkIndex = getTxLinkIndex();
+
+  auto &txLink = diversityLinks[txLinkIndex];
+  stopReceiveOnAllLinks(txLinkIndex);
+  bool result = txLink.link->transmitDataframe(dataframe);
   if (result) {
     transmitting = Core::NOW();
   }
@@ -94,13 +113,11 @@ size_t Sx1280Diversity::getMaxPacketSize() const {
  * dataframes.
  */
 bool Sx1280Diversity::isChannelBlocked() const {
-  // Check if any diversity link reports blocked.
-  for (size_t i = 0; i < diversityLinks.size(); i++) {
-    if (diversityLinks[i].link->isChannelBlocked()) {
-      return true;
-    }
+  if (diversityLinks.size() == 0) {
+    return true;
   }
-  return false;
+  // Check the link that will actually be used for TX.
+  return diversityLinks[getTxLinkIndex()].link->isChannelBlocked();
 }
 
 size_t Sx1280Diversity::getNumChannels() const {
@@ -130,7 +147,7 @@ int16_t Sx1280Diversity::lastPacketSNR() const {
 
 void Sx1280Diversity::startReceiveOnAllLinks() {
   for (size_t i = 0; i < diversityLinks.size(); i++) {
-    diversityLinks[i].link->setEnableTxRx(true);
+    diversityLinks[i].link->setStartReceive(true);
   }
 }
 void Sx1280Diversity::stopReceiveOnAllLinks(size_t exceptIndex) {
@@ -138,20 +155,41 @@ void Sx1280Diversity::stopReceiveOnAllLinks(size_t exceptIndex) {
     if (i == exceptIndex) {
       continue;
     }
-    diversityLinks[i].link->setEnableTxRx(false);
+    diversityLinks[i].link->setStartReceive(false);
+  }
+}
+
+void Sx1280Diversity::setStartReceive(bool rxEnabled) {
+  for (size_t i = 0; i < diversityLinks.size(); i++) {
+    diversityLinks[i].link->setStartReceive(rxEnabled);
+  }
+}
+
+void Sx1280Diversity::setEnableTxRx(bool enable) {
+  for (size_t i = 0; i < diversityLinks.size(); i++) {
+    diversityLinks[i].link->setEnableTxRx(enable);
+  }
+}
+
+void Sx1280Diversity::setEnableAutoRx(bool enableAutoRx) {
+  for (size_t i = 0; i < diversityLinks.size(); i++) {
+    diversityLinks[i].link->setEnableAutoRx(enableAutoRx);
   }
 }
 
 void Sx1280Diversity::determineBestLink() {
+  // Require a new link to be at least kHysteresisDb better than the current
+  // best to prevent rapid flapping when both radios have similar signal.
+  static constexpr int16_t kHysteresisDb = 3;
+
+  int16_t currentSnr = diversityLinks[currentBestLinkIndex].lastPacketInfo.snr;
   size_t bestLinkIndex = currentBestLinkIndex;
-  size_t bestSnr = -200;
 
   for (size_t i = 0; i < diversityLinks.size(); i++) {
-    const auto &linkInfo = diversityLinks[i];
-    const auto &lnkSnr = linkInfo.lastPacketInfo.snr;
-
-    if (lnkSnr > bestSnr) {
-      bestSnr = lnkSnr;
+    if (i == currentBestLinkIndex)
+      continue;
+    int16_t snr = diversityLinks[i].lastPacketInfo.snr;
+    if (snr > currentSnr + kHysteresisDb) {
       bestLinkIndex = i;
     }
   }
