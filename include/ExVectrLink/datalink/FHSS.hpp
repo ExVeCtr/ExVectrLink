@@ -95,25 +95,11 @@ public:
   /// @brief Returns the current timing offset correction in nanoseconds.
   int64_t getTimingOffset() const;
 
+  /// @brief Returns the actual slot interval including corrections (ns).
+  int64_t getTrueSlotInterval() const;
+
   /// @brief Returns the current slot counter within the hop cycle.
   uint8_t getSlotCounter() const;
-
-  // ===================== Hop Guard =====================
-
-  /// @brief Register a scheduler task to be paused during the hop guard
-  /// window. The task will be automatically paused ~margin before and after
-  /// each frequency hop to protect timing-critical radio operations.
-  void addHopGuardedTask(Core::Scheduler::Task &task);
-
-  /// @brief Remove a previously registered hop-guarded task.
-  void removeHopGuardedTask(Core::Scheduler::Task &task);
-
-  /// @brief Set the hop guard margin in nanoseconds. Guarded tasks are paused
-  /// this long before and after each hop. Default is 2 ms.
-  void setHopGuardMargin(int64_t marginNs);
-
-  /// @brief Returns true if currently within the hop guard window.
-  bool isInHopGuardWindow() const;
 
   // ===================== DatalinkI Interface =====================
 
@@ -174,37 +160,30 @@ private:
   int64_t lastChannelHopTime = 0;
 
   // ----- Timing -----
-  enum class SlotPhase {
-    Start,
-    Idle,
-    Scheduling,
-  };
   int64_t threadStart = 0;
-  SlotPhase slotPhase = SlotPhase::Start;
-  bool slotTxDone = false;
+
+  /// Correction applied to the slot interval to compensate for clock
+  /// frequency mismatch between TX and RX (RX side only, in nanoseconds).
+  float intervalCorrection = 0;
 
   // ---- Slot state ----
   int64_t currentSlotStart = 0;
+  int64_t lastSlotStart = 0;
   int64_t slotTimingOffset = 0;
   int64_t slotOffsetTime = 0;
   size_t slotCounter = 0;        // Counts from 0 to slotsPerHop
   size_t roleReverseCounter = 0; // Counts from 0 to numTxPacketsToRx
   bool lastSlotWasReceive = false;
   bool receivedPacket = false;
+  bool txSlotTrig = false;
   int64_t lastPacketRcvTime = 0;
 
   // ---- Sync state ----
   FHSSState fhssState = FHSSState::Searching;
   int64_t lastSearchHopTime = 0;
+  int64_t syncedStartTime = 0;
 
   int64_t lastTxPrint = 0;
-
-  // ===================== Slot Guard =====================
-  int64_t slotGuardMargin = 2 * Core::MILLISECONDS;
-  bool hopGuardActive_ = false;
-  Core::ListArray<Core::Scheduler::Task *> hopGuardedTasks;
-
-  void setGuardedTasks(bool paused);
 
   // ---- Packet data ----
   VCTR::network::DataPacket packetToSend;

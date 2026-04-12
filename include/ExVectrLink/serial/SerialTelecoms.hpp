@@ -109,7 +109,7 @@ private:
   VCTR::ExVectrLink::packets::SerialPacketType currentPacketType;
   uint8_t packetLength;
 
-  Core::ListBuffer<uint8_t, 5000> sendDataBuffer;
+  Core::ListBuffer<uint8_t, 100> sendDataBuffer;
 
   int64_t lastSerialByteTime = 0;
   int64_t lastValidPacketTime = 0;
@@ -123,6 +123,8 @@ private:
 
   bool isSerialConnected = false;
   bool isOtherEndSerialConnected = false;
+
+  bool readWriteSwitch = false;
 };
 
 } // namespace VCTR::ExVectrLink

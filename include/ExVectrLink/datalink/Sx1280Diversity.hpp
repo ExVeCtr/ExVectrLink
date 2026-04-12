@@ -11,12 +11,14 @@
 
 namespace VCTR::ExVectrLink::datalink {
 
-class Sx1280Diversity : public VCTR::network::datalink::RadioI {
+class Sx1280Diversity : public VCTR::network::datalink::RadioI,
+                        public VCTR::Core::Task_Periodic {
 private:
   struct Sx1280PacketRfInfo {
     int16_t rssi;
     int16_t snr;
-    Core::ListBuffer<uint8_t, 5> receivedIds;
+    int64_t receivedTime = 0;
+    VCTR::network::DataPacket packet;
   };
   struct Sx1280LinkInfo {
     VCTR::network::datalink::Datalink_SX1280_V2 *link;
@@ -70,10 +72,15 @@ public:
   void setEnableTxRx(bool enable) override;
   void setEnableAutoRx(bool enableAutoRx) override;
 
+  void taskInit() override;
+  void taskThread() override;
+
 private:
   void startReceiveOnAllLinks();
   void stopReceiveOnAllLinks(size_t exceptIndex = -1);
   void determineBestLink();
+
+  void processReceivedPackets();
 
   size_t getTxLinkIndex() const;
 

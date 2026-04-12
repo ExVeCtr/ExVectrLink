@@ -60,9 +60,9 @@ void SerialTelecoms::taskCheck() {
 void SerialTelecoms::taskThread() {
   int64_t loopStart = Core::NOW();
 
-  // Bulk read incoming serial data
   const auto bufferSize = 10;
-  {
+  auto readData = [this, &loopStart]() {
+    // Bulk read incoming serial data
     uint8_t readBuffer[bufferSize];
     size_t available;
     while ((available = serialPort.readable()) > 0 &&
@@ -75,10 +75,10 @@ void SerialTelecoms::taskThread() {
         decodeSerialByte(readBuffer[i]);
       }
     }
-  }
+  };
 
   // Bulk write outgoing serial data
-  {
+  auto writeData = [this, &loopStart]() {
     uint8_t writeBuffer[bufferSize];
     while (sendDataBuffer.size() > 0 &&
            Core::NOW() - loopStart < 1 * Core::MILLISECONDS) {
@@ -93,7 +93,16 @@ void SerialTelecoms::taskThread() {
         break;
       sendDataBuffer.removeFront(bytesWritten);
     }
+  };
+
+  if (readWriteSwitch) {
+    readData();
+    writeData();
+  } else {
+    writeData();
+    readData();
   }
+  readWriteSwitch = !readWriteSwitch;
 
   if (lastSerialByteTime != lastLoopTime && baudrate != standardBaudrate &&
       loopStart - lastSerialByteTime > 1000 * Core::MILLISECONDS) {
