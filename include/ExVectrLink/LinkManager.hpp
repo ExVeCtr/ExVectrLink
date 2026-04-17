@@ -86,6 +86,7 @@ private:
   bool failsafe = false;
 
   uint8_t linkQuality = 0;
+  uint8_t lastLinkQuality = 0;
   int8_t linkSnr = -100;
   int8_t linkRssi = -127;
 

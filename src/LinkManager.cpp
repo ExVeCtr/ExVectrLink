@@ -158,12 +158,17 @@ void LinkManager::updateDynamicPowerManagement() {
   if (Core::NOW() - lastPowerChangeTime > 0) {
     lastPowerChangeTime = Core::NOW() + 10 * Core::MILLISECONDS;
 
-    if ((linkQuality < 85 || linkSnr < -2) &&
+    if (lastLinkQuality - linkQuality > 20 &&
         currentTxPowerDBm < numPowerLevels - 1 &&
         powerLevels[currentTxPowerDBm + 1] <= maxTxPowerDBm) {
       currentTxPowerDBm++;
       lastPowerChangeTime = Core::NOW() + 100 * Core::MILLISECONDS;
-    } else if (linkQuality > 95 && currentTxPowerDBm > 0 && linkSnr > 2 &&
+    } else if ((linkQuality <= 70 || linkSnr <= 0) &&
+               currentTxPowerDBm < numPowerLevels - 1 &&
+               powerLevels[currentTxPowerDBm + 1] <= maxTxPowerDBm) {
+      currentTxPowerDBm++;
+      lastPowerChangeTime = Core::NOW() + 100 * Core::MILLISECONDS;
+    } else if (linkQuality >= 95 && currentTxPowerDBm > 0 && linkSnr >= 5 &&
                powerLevels[currentTxPowerDBm - 1] > minTxPowerDBm) {
       currentTxPowerDBm--;
       lastPowerChangeTime = Core::NOW() + 500 * Core::MILLISECONDS;
@@ -173,6 +178,8 @@ void LinkManager::updateDynamicPowerManagement() {
       currentTxPowerDBm = numPowerLevels - 1;
     }
     link.setTxPower(powerLevels[currentTxPowerDBm]);
+
+    lastLinkQuality = linkQuality;
   }
 }
 
