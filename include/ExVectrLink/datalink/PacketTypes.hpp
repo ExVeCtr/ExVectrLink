@@ -8,8 +8,10 @@
 namespace VCTR::ExVectrLink::datalink {
 
 enum PacketTypes : uint8_t {
-  Data,
-  Heartbeat,
+  Data = 0, ///< Payload is raw data from the external serial connection.
+  Heartbeat = 1,
+  LinkTelemetry =
+      2, ///< 4-byte compact link telemetry (antenna, LQ, txPower, RSSI, SNR).
 };
 
 } // namespace VCTR::ExVectrLink::datalink

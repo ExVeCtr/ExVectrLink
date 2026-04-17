@@ -14,7 +14,7 @@ namespace VCTR::ExVectrLink::datalink {
 
 Sx1280Diversity::Sx1280Diversity(
     std::initializer_list<VCTR::network::datalink::Datalink_SX1280_V2 *> links)
-    : VCTR::Core::Task_Periodic("Sx1280Diversity", 100 * Core::MILLISECONDS) {
+    : VCTR::Core::Scheduler::Task("Sx1280Diversity") {
   Core::getSystemScheduler().addTask(*this);
   if (links.size() == 0) {
     return;
@@ -29,14 +29,17 @@ void Sx1280Diversity::addDiversityLink(
   auto linkIndex = diversityLinks.size();
   diversityLinks.append({&link, {0, 0, 0}});
   link.addTransmitFinishedHandler([this, linkIndex]() {
-    transmitting = 0;
+    // transmitting = 0;
     startReceiveOnAllLinks();
   });
   link.addReceiveHandler(
       [this, linkIndex](const VCTR::network::DataPacket &dataframe) {
-        if (transmitting) {
-          return;
-        }
+        // if (Core::NOW() > transmitting) {
+        //   return;
+        // }
+
+        // receiveHandlers_.callHandlers(dataframe);
+        // return;
 
         receiving = true;
 
@@ -44,9 +47,11 @@ void Sx1280Diversity::addDiversityLink(
         linkInfo.lastPacketInfo.rssi = linkInfo.link->lastPacketRSSI();
         linkInfo.lastPacketInfo.snr = linkInfo.link->lastPacketSNR();
         linkInfo.lastPacketInfo.receivedTime = dataframe.timestamp;
-        linkInfo.lastPacketInfo.packet = dataframe;
+        // linkInfo.lastPacketInfo.packet = dataframe;
 
         determineBestLink();
+
+        receiveHandlers_.callHandlers(dataframe);
 
         /**
          * Ok so we've received a packet. We now check if all links have
@@ -57,25 +62,37 @@ void Sx1280Diversity::addDiversityLink(
          * reset.
          */
 
-        // receiveHandlers_.callHandlers(dataframe);
-        // return;
+        // if (dataframe.timestamp - transmitting > 3 * Core::MILLISECONDS) {
+        //   receiving = true;
 
-        auto linkMissingRecv = false;
-        for (size_t i = 0; i < diversityLinks.size(); i++) {
-          auto &linkInfo = diversityLinks[i].lastPacketInfo;
-          if (linkInfo.receivedTime == 0) {
-            linkMissingRecv = true;
-            break;
-          }
-        }
-        if (linkMissingRecv) {
-          auto taskRun = Core::NOW() + 1 * Core::MILLISECONDS;
-          setDeadline(taskRun);
-          setRelease(taskRun);
-        } else {
-          receiving = false;
-          processReceivedPackets();
-        }
+        //   auto &linkInfo = diversityLinks[linkIndex];
+        //   linkInfo.lastPacketInfo.rssi = linkInfo.link->lastPacketRSSI();
+        //   linkInfo.lastPacketInfo.snr = linkInfo.link->lastPacketSNR();
+        //   linkInfo.lastPacketInfo.receivedTime = dataframe.timestamp;
+        //   // linkInfo.lastPacketInfo.packet = dataframe;
+
+        //   determineBestLink();
+
+        //   receiveHandlers_.callHandlers(dataframe);
+        //   // processReceivedPackets();
+        // }
+
+        // auto linkMissingRecv = false;
+        // for (size_t i = 0; i < diversityLinks.size(); i++) {
+        //   auto &linkInfo = diversityLinks[i].lastPacketInfo;
+        //   if (linkInfo.receivedTime == 0) {
+        //     linkMissingRecv = true;
+        //     break;
+        //   }
+        // }
+        // if (linkMissingRecv) {
+        //   auto taskRun = Core::NOW() + 1 * Core::MILLISECONDS;
+        //   setDeadline(taskRun);
+        //   setRelease(taskRun);
+        // } else {
+        //   receiving = false;
+        //   // processReceivedPackets();
+        // }
       });
 }
 
@@ -115,7 +132,7 @@ bool Sx1280Diversity::transmitDataframe(
 
   auto txLinkIndex = getTxLinkIndex();
   auto &txLink = diversityLinks[txLinkIndex];
-  transmitting = Core::NOW();
+  transmitting = dataframe.timestamp;
   stopReceiveOnAllLinks(txLinkIndex);
   return txLink.link->transmitDataframe(dataframe);
 }
@@ -173,8 +190,8 @@ int16_t Sx1280Diversity::lastPacketSNR() const {
 
 void Sx1280Diversity::startReceiveOnAllLinks() {
   for (size_t i = 0; i < diversityLinks.size(); i++) {
-    diversityLinks[i].link->setStartReceive(true);
     diversityLinks[i].link->setEnableTxRx(true);
+    // diversityLinks[i].link->setStartReceive(true);
   }
 }
 void Sx1280Diversity::stopReceiveOnAllLinks(size_t exceptIndex) {
@@ -182,7 +199,7 @@ void Sx1280Diversity::stopReceiveOnAllLinks(size_t exceptIndex) {
     if (i == exceptIndex) {
       continue;
     }
-    diversityLinks[i].link->setStartReceive(false);
+    // diversityLinks[i].link->setStartReceive(false);
     diversityLinks[i].link->setEnableTxRx(false);
   }
 }
@@ -190,7 +207,7 @@ void Sx1280Diversity::stopReceiveOnAllLinks(size_t exceptIndex) {
 void Sx1280Diversity::setStartReceive(bool rxEnabled) {
   for (size_t i = 0; i < diversityLinks.size(); i++) {
     diversityLinks[i].link->setStartReceive(rxEnabled);
-    diversityLinks[i].link->setEnableTxRx(rxEnabled);
+    // diversityLinks[i].link->setEnableTxRx(rxEnabled);
   }
 }
 
@@ -213,6 +230,7 @@ void Sx1280Diversity::taskThread() {
     receiving = false;
     processReceivedPackets();
   }
+  setRelease(Core::END_OF_TIME);
 }
 
 void Sx1280Diversity::determineBestLink() {

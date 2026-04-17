@@ -286,32 +286,53 @@ public:
 
 class SerialPacket_LinkInfo {
 public:
-  int8_t rssi;
-  int8_t snr;
-  uint8_t antenna; // Current antenna in use.
-  int8_t txPower;
+  /// Per-side link statistics (14 bytes serialised).
+  struct SideStats {
+    int8_t rssi = 0;         ///< dBm (negative)
+    int8_t snr = 0;          ///< dB
+    int8_t txPower = 0;      ///< dBm
+    uint8_t antenna = 0;     ///< Active antenna index
+    uint8_t linkQuality = 0; ///< 0-100 %
+    uint8_t lossRate = 0;    ///< 0-100 % (100 = all lost)
+  };
 
-  uint8_t lossRate; // percentage of packets lost. 0 good, 100 all.
-
-  bool dualLinkMode;
+  SideStats local;  ///< Stats as seen / reported by this node.
+  SideStats remote; ///< Stats received from the far end via OTA LinkTelemetry.
+  bool remoteValid = false; ///< True once at least one OTA packet received.
 
   SerialPacketType getPacketType() const { return SerialPacketType::LinkInfo; }
-  uint8_t numBytes() const { return 6; }
+  // 6 bytes × 2 sides + 1 valid flag = 13 bytes
+  uint8_t numBytes() const { return 13; }
+
   void serialize(uint8_t *buffer) const {
-    buffer[0] = rssi;
-    buffer[1] = snr;
-    buffer[2] = antenna;
-    buffer[3] = lossRate;
-    buffer[4] = dualLinkMode ? 1 : 0;
-    buffer[5] = txPower;
+    buffer[0] = (uint8_t)local.rssi;
+    buffer[1] = (uint8_t)local.snr;
+    buffer[2] = (uint8_t)local.txPower;
+    buffer[3] = local.antenna;
+    buffer[4] = local.linkQuality;
+    buffer[5] = local.lossRate;
+    buffer[6] = (uint8_t)remote.rssi;
+    buffer[7] = (uint8_t)remote.snr;
+    buffer[8] = (uint8_t)remote.txPower;
+    buffer[9] = remote.antenna;
+    buffer[10] = remote.linkQuality;
+    buffer[11] = remote.lossRate;
+    buffer[12] = remoteValid ? 1 : 0;
   }
   bool deserialize(const uint8_t *buffer) {
-    rssi = buffer[0];
-    snr = buffer[1];
-    antenna = buffer[2];
-    lossRate = buffer[3];
-    dualLinkMode = buffer[4] == 1;
-    txPower = buffer[5];
+    local.rssi = (int8_t)buffer[0];
+    local.snr = (int8_t)buffer[1];
+    local.txPower = (int8_t)buffer[2];
+    local.antenna = buffer[3];
+    local.linkQuality = buffer[4];
+    local.lossRate = buffer[5];
+    remote.rssi = (int8_t)buffer[6];
+    remote.snr = (int8_t)buffer[7];
+    remote.txPower = (int8_t)buffer[8];
+    remote.antenna = buffer[9];
+    remote.linkQuality = buffer[10];
+    remote.lossRate = buffer[11];
+    remoteValid = buffer[12] == 1;
     return true;
   }
 };

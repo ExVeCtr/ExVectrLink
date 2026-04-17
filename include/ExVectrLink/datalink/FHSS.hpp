@@ -114,11 +114,7 @@ public:
   void taskThread() override;
 
 private:
-  /// @brief Internal packet types appended to each frame as a trailer.
-  enum class PacketType : uint8_t {
-    Data,     ///< User data packet.
-    LinkInfo, ///< Keep-alive / link quality info packet.
-  };
+  static constexpr uint8_t OTA_VERSION = 1;
 
   /// @brief Number of trailer bytes appended to each outgoing frame.
   /// Layout: 1 bit data flag | 7 bits Quality | 4 bit slotCounter | 4 bit key
@@ -130,7 +126,7 @@ private:
   void syncTimer(int64_t receiveStartTime);
   void hopChannel(bool reverse = false);
 
-  void transmitPacket(network::DataPacket &packet);
+  void transmitDataPacket(network::DataPacket &packetData);
   void receivePacket(const network::DataPacket &packet);
 
   void updateLinkQuality();

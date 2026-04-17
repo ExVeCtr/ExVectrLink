@@ -12,7 +12,7 @@
 namespace VCTR::ExVectrLink::datalink {
 
 class Sx1280Diversity : public VCTR::network::datalink::RadioI,
-                        public VCTR::Core::Task_Periodic {
+                        public VCTR::Core::Scheduler::Task {
 private:
   struct Sx1280PacketRfInfo {
     int16_t rssi;
@@ -94,6 +94,7 @@ private:
   uint8_t currentBestLinkLq = 0;
 
   int64_t transmitting = 0;
+  int64_t lastReceiveAcceptTime = 0;
   bool receiving = false;
 };
 
