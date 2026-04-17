@@ -25,14 +25,24 @@ struct ModulationParams {
 extern const ModulationParams modulationPresets[ModulationPresets::MAX];
 
 struct LinkInfo {
-  int8_t rssi;
-  int8_t snr;
-  uint8_t antenna; // Current antenna in use.
+  // --- Local side (as seen by this node) ---
+  int8_t rssi = 0;
+  int8_t snr = 0;
+  uint8_t antenna = 0;     // Current antenna in use.
+  uint8_t lossRate = 0;    // percentage of last 100 packets that were lost.
+  uint8_t linkQuality = 0; // percentage of last 100 packets received.
+  int8_t txPower = 0;      // TX power in dBm.
 
-  // percentage of last 100 packets that were lost.
-  uint8_t lossRate;
+  // --- Remote side (received via OTA LinkTelemetry) ---
+  int8_t remoteRssi = 0;
+  int8_t remoteSnr = 0;
+  uint8_t remoteAntenna = 0;
+  uint8_t remoteLossRate = 0;
+  uint8_t remoteLinkQuality = 0;
+  int8_t remoteTxPower = 0;
+  bool remoteValid = false;
 
-  bool dualLinkMode;
+  bool dualLinkMode = false;
 };
 
 /**

@@ -291,8 +291,20 @@ void SerialTelecomsDatalink::addHandlers() {
                                   });
   telecoms.addSerialPacketHandler<SerialPacket_LinkInfo>(
       [this](const SerialPacket_LinkInfo &packet) {
-        linkinfo = {packet.rssi, packet.snr, packet.antenna, packet.lossRate,
-                    packet.dualLinkMode};
+        linkinfo.rssi = packet.local.rssi;
+        linkinfo.snr = packet.local.snr;
+        linkinfo.antenna = packet.local.antenna;
+        linkinfo.lossRate = packet.local.lossRate;
+        linkinfo.linkQuality = packet.local.linkQuality;
+        linkinfo.txPower = packet.local.txPower;
+        linkinfo.remoteRssi = packet.remote.rssi;
+        linkinfo.remoteSnr = packet.remote.snr;
+        linkinfo.remoteAntenna = packet.remote.antenna;
+        linkinfo.remoteLossRate = packet.remote.lossRate;
+        linkinfo.remoteLinkQuality = packet.remote.linkQuality;
+        linkinfo.remoteTxPower = packet.remote.txPower;
+        linkinfo.remoteValid = packet.remoteValid;
+        linkinfo.dualLinkMode = false;
       });
 
   telecoms
