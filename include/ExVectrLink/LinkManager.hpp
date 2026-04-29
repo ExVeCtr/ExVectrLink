@@ -39,9 +39,7 @@ public:
 
   void enableFhss(bool enable);
 
-  void setMinTxPower(uint8_t minDBm);
-  void setMaxTxPower(uint8_t maxDBm);
-  uint8_t getCurrentTxPower() const;
+  void setPowerParams(uint8_t txPower, bool dynamicPower);
 
   bool isFailsafe() const;
 
@@ -66,15 +64,14 @@ public:
 private:
   void receivePacket(const VCTR::network::DataPacket &packet);
   void updateFailsafeState();
-  void updateDynamicPowerManagement();
   void updateBindingState();
   void updateLinkQualityMetrics();
 
   VCTR::ExVectrLink::ExVectrLinkI &link;
   uint8_t mak;
 
-  uint8_t minTxPowerDBm = 7;
-  uint8_t maxTxPowerDBm = 10;
+  uint8_t minTxPowerDBm = 10;
+  uint8_t maxTxPowerDBm = 12;
   uint8_t currentTxPowerDBm = 0;
 
   int64_t lastPowerChangeTime = 0;

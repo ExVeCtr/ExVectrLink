@@ -64,21 +64,26 @@ float FHSS::getLinkQuality() const {
   return (float)(isRxSide ? linkQuality : otherEndLinkQuality);
 }
 
-float FHSS::getSnr() const {
-  return isRxSide ? (float)radioLink.lastPacketSNR() : otherEndSnr;
-}
-
 int64_t FHSS::getTimingOffset() const { return slotTimingOffset; }
 
 int64_t FHSS::getTrueSlotInterval() const { return trueSlotInterval; }
 
 uint8_t FHSS::getSlotCounter() const { return slotCounter; }
 
+void FHSS::addSlotHandler(HandlerFunction handler) {
+  slotHandlers.addHandler(handler);
+}
+
 // =============================================================================
 // DatalinkI interface
 // =============================================================================
 
 bool FHSS::transmitDataframe(const VCTR::network::DataPacket &dataframe) {
+
+  if (dataframe.payload.size() > getMaxPacketSize()) {
+    // Packet too large, drop it.
+    return false;
+  }
 
   // uint8_t trailerByte1 =
   //     (0b10000000) | (uint8_t)(uint8_t)(linkQuality * 127.0f) & 0x7F;
@@ -88,7 +93,7 @@ bool FHSS::transmitDataframe(const VCTR::network::DataPacket &dataframe) {
   return true;
 }
 
-size_t FHSS::getMaxPacketSize() const { return 8; }
+size_t FHSS::getMaxPacketSize() const { return 9; }
 
 bool FHSS::isChannelBlocked() const { return packetToSend.payload.size() > 0; }
 
@@ -231,7 +236,7 @@ void FHSS::transmitDataPacket(network::DataPacket &packetData) {
 
   packetData.payload.append(byte1);
 
-  auto crc = key + OTA_VERSION;
+  auto crc = key + OTA_VERSION + (isRxSide ? 0x40 : 0x00);
   for (size_t i = 0; i < packetData.payload.size(); i++) {
     crc ^= packetData.payload[i];
   }
@@ -252,7 +257,7 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
   auto packetCrc = packet.payload[payloadEnd - 1];
   auto byte1 = packet.payload[payloadEnd - 2];
 
-  auto crc = key + OTA_VERSION;
+  auto crc = key + OTA_VERSION + (!isRxSide ? 0x40 : 0x00);
   for (size_t i = 0; i < payloadEnd - 1; i++) {
     crc ^= packet.payload[i];
   }
@@ -263,17 +268,26 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
   uint8_t txSlotCounter = byte1 & 0x03;
   uint8_t txRoleReverseCounter = (byte1 >> 2) & 0x3F;
 
-  if (true || packet.timestamp > lastPacketRcvTime > 2 * Core::MILLISECONDS) {
-
-    receivedPacket = true;
-
-    if (isRxSide && fhssState != FHSSState::Synced) {
-      roleReverseCounter = txRoleReverseCounter;
-      slotCounter = txSlotCounter;
+  if (isRxSide && fhssState != FHSSState::Synced) {
+    roleReverseCounter = txRoleReverseCounter;
+    slotCounter = txSlotCounter;
+  }
+  if (isRxSide) {
+    if (roleReverseCounter != txRoleReverseCounter) {
+      falseCounterCount++;
+      if (falseCounterCount > 10) {
+        // Too many mismatches, probably out of sync.  Reset to Syncing.
+        fhssState = FHSSState::Syncing;
+        roleReverseCounter = txRoleReverseCounter;
+        slotCounter = txSlotCounter;
+      }
     }
-    syncTimer(packet.timestamp);
+  }
+  syncTimer(packet.timestamp);
 
-    // Forward data packets to application handlers.
+  if (!isRxSide || roleReverseCounter == txRoleReverseCounter) {
+    receivedPacket = true;
+    falseCounterCount = 0;
     if (packet.payload.size() > 2) {
       auto dataPacket = packet;
       dataPacket.payload.popDiscard(2);
@@ -309,6 +323,7 @@ void FHSS::taskInit() {
 void FHSS::taskCheck() {}
 
 void FHSS::taskThread() {
+
   threadStart = Core::NOW() - slotOffsetTime;
 
   timingControl();
@@ -388,6 +403,9 @@ void FHSS::timingControl() {
   // slot start.
   // -----------------------------------------------------------------
 
+  slotHandlers.callHandlers(FHSSSlotEvent::SlotEnd, !thisSlotIsTx,
+                            receivedPacket, fhssState);
+
   // --- Update interval correction for clock drift ---
   trueSlotInterval = slotInterval + (int64_t)intervalCorrection +
                      (receivedPacket ? slotTimingOffset * 0.0001 : 0);
@@ -431,7 +449,7 @@ void FHSS::timingControl() {
   // Determine the role for this slot:
   //   RX side:  TX when roleReverseCounter == 0, RX otherwise.
   //   TX side:  TX when roleReverseCounter != 0, RX otherwise.
-  bool thisSlotIsTx =
+  thisSlotIsTx =
       isRxSide ? (roleReverseCounter == 0) : (roleReverseCounter != 0);
 
   lastSlotWasReceive = !thisSlotIsTx;
@@ -448,8 +466,8 @@ void FHSS::timingControl() {
   }
 
   // --- TX or RX ---
-  bool allowedToTx = !isRxSide || fhssState == FHSSState::Synced;
-  bool blocked =
+  allowedToTx = !isRxSide || fhssState == FHSSState::Synced;
+  blocked =
       radioLink.isChannelBlocked(); // || packetToSend.payload.size() == 0;
 
   if (thisSlotIsTx && allowedToTx && !blocked) {
@@ -465,8 +483,10 @@ void FHSS::timingControl() {
   // act right when the slot starts.
   int64_t nextSlotStart =
       currentSlotStart + getAdjustedSlotInterval() + slotOffsetTime;
-  setDeadline(nextSlotStart);
-  setRelease(nextSlotStart - 2 * Core::MILLISECONDS);
+  setDeadline(nextSlotStart - 3 * Core::MILLISECONDS);
+  setRelease(nextSlotStart - 3 * Core::MILLISECONDS);
+
+  schedulingPhase = true;
 }
 
 int64_t FHSS::getAdjustedSlotInterval() const { return trueSlotInterval; }

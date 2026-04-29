@@ -30,7 +30,7 @@ void Sx1280Diversity::addDiversityLink(
   diversityLinks.append({&link, {0, 0, 0}});
   link.addTransmitFinishedHandler([this, linkIndex]() {
     // transmitting = 0;
-    startReceiveOnAllLinks();
+    // startReceiveOnAllLinks();
   });
   link.addReceiveHandler(
       [this, linkIndex](const VCTR::network::DataPacket &dataframe) {
@@ -41,11 +41,18 @@ void Sx1280Diversity::addDiversityLink(
         // receiveHandlers_.callHandlers(dataframe);
         // return;
 
+        if (Core::NOW() - lastReceiveAcceptTime < 3 * Core::MILLISECONDS) {
+          return;
+        }
+
         receiving = true;
+        lastReceiveAcceptTime = Core::NOW();
 
         auto &linkInfo = diversityLinks[linkIndex];
-        linkInfo.lastPacketInfo.rssi = linkInfo.link->lastPacketRSSI();
-        linkInfo.lastPacketInfo.snr = linkInfo.link->lastPacketSNR();
+        linkInfo.lastPacketInfo.rssi = linkInfo.lastPacketInfo.rssi * 0.8 +
+                                       linkInfo.link->lastPacketRSSI() * 0.2;
+        linkInfo.lastPacketInfo.snr = linkInfo.lastPacketInfo.snr * 0.8 +
+                                      linkInfo.link->lastPacketSNR() * 0.2;
         linkInfo.lastPacketInfo.receivedTime = dataframe.timestamp;
         // linkInfo.lastPacketInfo.packet = dataframe;
 
@@ -133,7 +140,7 @@ bool Sx1280Diversity::transmitDataframe(
   auto txLinkIndex = getTxLinkIndex();
   auto &txLink = diversityLinks[txLinkIndex];
   transmitting = dataframe.timestamp;
-  stopReceiveOnAllLinks(txLinkIndex);
+  // stopReceiveOnAllLinks(txLinkIndex);
   return txLink.link->transmitDataframe(dataframe);
 }
 
@@ -188,6 +195,13 @@ int16_t Sx1280Diversity::lastPacketSNR() const {
   return diversityLinks[currentBestLinkIndex].lastPacketInfo.snr;
 }
 
+int16_t Sx1280Diversity::lastPacketRSSI() const {
+  if (diversityLinks.size() == 0) {
+    return 0;
+  }
+  return diversityLinks[currentBestLinkIndex].lastPacketInfo.rssi;
+}
+
 void Sx1280Diversity::startReceiveOnAllLinks() {
   for (size_t i = 0; i < diversityLinks.size(); i++) {
     diversityLinks[i].link->setEnableTxRx(true);
@@ -236,6 +250,11 @@ void Sx1280Diversity::taskThread() {
 void Sx1280Diversity::determineBestLink() {
   // Require a new link to be at least kHysteresisDb better than the current
   // best to prevent rapid flapping when both radios have similar signal.
+
+  if (Core::NOW() - lastbestLinkUpdateTime < 5 * Core::MILLISECONDS) {
+    return;
+  }
+  lastbestLinkUpdateTime = Core::NOW();
   static constexpr int16_t kHysteresisDb = 0;
 
   int16_t currentSnr = diversityLinks[currentBestLinkIndex].lastPacketInfo.snr;

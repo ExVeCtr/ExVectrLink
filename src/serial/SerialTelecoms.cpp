@@ -315,9 +315,9 @@ void SerialTelecomsDatalink::addHandlers() {
           });
 }
 
-void SerialTelecomsDatalink::setTxPower(uint8_t txPower) {
-  telecoms.sendSerialPacket<SerialPacket_SetTxPower>(
-      SerialPacket_SetTxPower{txPower});
+void SerialTelecomsDatalink::setTxPower(uint8_t txPower, bool dynamicPower) {
+  telecoms.sendSerialPacket<SerialPacket_SetPowerParams>(
+      SerialPacket_SetPowerParams{txPower, dynamicPower});
 }
 
 void SerialTelecomsDatalink::setModulationPreset(

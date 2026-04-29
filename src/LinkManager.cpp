@@ -38,7 +38,6 @@ LinkManager::LinkManager(VCTR::ExVectrLink::ExVectrLinkI &link, uint8_t mak)
     : Core::Task_Periodic("LinkManager", 100 * Core::MILLISECONDS), link(link),
       mak(mak) {
   setMak(mak);
-  setMaxTxPower(maxTxPowerDBm);
 
   fhssSequenceKey = makeFhssSequenceKey(mak);
 
@@ -58,10 +57,8 @@ void LinkManager::taskCheck() {}
 
 void LinkManager::taskThread() {
   updateFailsafeState();
-  updateDynamicPowerManagement();
   updateBindingState();
   updateLinkQualityMetrics();
-  updateDynamicPowerManagement();
 }
 
 void LinkManager::enableFhss(bool enable) {
@@ -69,12 +66,8 @@ void LinkManager::enableFhss(bool enable) {
   link.setEnableFhss(enable, fhssSequenceKey);
 }
 
-void LinkManager::setMinTxPower(uint8_t minDBm) { minTxPowerDBm = minDBm; }
-
-void LinkManager::setMaxTxPower(uint8_t maxDBm) { maxTxPowerDBm = maxDBm; }
-
-uint8_t LinkManager::getCurrentTxPower() const {
-  return powerLevels[currentTxPowerDBm];
+void LinkManager::setPowerParams(uint8_t txPower, bool dynamicPower) {
+  link.setTxPower(txPower, dynamicPower);
 }
 
 bool LinkManager::isFailsafe() const { return failsafe; }
@@ -143,44 +136,6 @@ void LinkManager::updateFailsafeState() {
   //   link.setTxPower(powerLevels[currentTxPowerDBm]);
   // }
   failsafe = !link.isConnected();
-  if (failsafe) {
-    currentTxPowerDBm = 0;
-    for (size_t i = 0; i < numPowerLevels - 1 &&
-                       powerLevels[currentTxPowerDBm] < maxTxPowerDBm;
-         i++) {
-      currentTxPowerDBm++;
-    }
-    link.setTxPower(powerLevels[currentTxPowerDBm]);
-  }
-}
-
-void LinkManager::updateDynamicPowerManagement() {
-  if (Core::NOW() - lastPowerChangeTime > 0) {
-    lastPowerChangeTime = Core::NOW() + 10 * Core::MILLISECONDS;
-
-    if (lastLinkQuality - linkQuality > 20 &&
-        currentTxPowerDBm < numPowerLevels - 1 &&
-        powerLevels[currentTxPowerDBm + 1] <= maxTxPowerDBm) {
-      currentTxPowerDBm++;
-      lastPowerChangeTime = Core::NOW() + 100 * Core::MILLISECONDS;
-    } else if ((linkQuality <= 70 || linkSnr <= 0) &&
-               currentTxPowerDBm < numPowerLevels - 1 &&
-               powerLevels[currentTxPowerDBm + 1] <= maxTxPowerDBm) {
-      currentTxPowerDBm++;
-      lastPowerChangeTime = Core::NOW() + 100 * Core::MILLISECONDS;
-    } else if (linkQuality >= 95 && currentTxPowerDBm > 0 && linkSnr >= 5 &&
-               powerLevels[currentTxPowerDBm - 1] > minTxPowerDBm) {
-      currentTxPowerDBm--;
-      lastPowerChangeTime = Core::NOW() + 500 * Core::MILLISECONDS;
-    }
-
-    if (currentTxPowerDBm >= numPowerLevels) {
-      currentTxPowerDBm = numPowerLevels - 1;
-    }
-    link.setTxPower(powerLevels[currentTxPowerDBm]);
-
-    lastLinkQuality = linkQuality;
-  }
 }
 
 void LinkManager::updateBindingState() {}

@@ -12,7 +12,7 @@ namespace VCTR::ExVectrLink /* ExVectrLinkI */ {
 class ExVectrLinkI : public VCTR::network::datalink::DatalinkI {
 public:
   // Power in dBm.
-  virtual void setTxPower(uint8_t txPower) = 0;
+  virtual void setTxPower(uint8_t txPower, bool dynamicPower) = 0;
 
   virtual void setModulationPreset(
       VCTR::ExVectrLink::datalink::ModulationPresets preset) = 0;

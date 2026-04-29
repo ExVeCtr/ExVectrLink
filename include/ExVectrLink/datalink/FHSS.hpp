@@ -17,6 +17,11 @@ enum class FHSSState : uint8_t {
   Synced,    ///< Synced with the other side, normal operation.
 };
 
+enum class FHSSSlotEvent : uint8_t {
+  SlotStart,
+  SlotEnd,
+};
+
 /**
  * @brief FHSS (Frequency Hopping Spread Spectrum) with slot-based timing.
  *
@@ -44,18 +49,12 @@ enum class FHSSState : uint8_t {
  * rxEarlyOffset nanoseconds early to avoid missing the preamble
  * due to timing drift between the two sides. If a hop is also due,
  * the channel switch happens early too.
- *
- * ## Example (slotsPerHop=4, rxSlotIndex=3):
- * @code
- *   Slot:  |  0 [HOP] |    1     |    2     |  3 [REV] |  0 [HOP] | ...
- *   TX:    |    TX    |    TX    |    TX    |    RX    |    TX    | ...
- *   RX:    |   RX*    |   RX*   |   RX*   |    TX    |   RX*    | ...
- *                                                       * = early offset
- * applied
- * @endcode
  */
 class FHSS : public VCTR::network::datalink::DatalinkI,
              public VCTR::Core::Task_Periodic {
+private:
+  using HandlerFunction = std::function<void(
+      FHSSSlotEvent, bool isRxSlot, bool receivedPacket, FHSSState fhssState)>;
 
 public:
   FHSS(VCTR::network::datalink::RadioI &radioI);
@@ -90,7 +89,6 @@ public:
 
   /// @brief Returns link quality as 0.0 (no link) to 1.0 (perfect).
   float getLinkQuality() const;
-  float getSnr() const;
 
   /// @brief Returns the current timing offset correction in nanoseconds.
   int64_t getTimingOffset() const;
@@ -100,6 +98,10 @@ public:
 
   /// @brief Returns the current slot counter within the hop cycle.
   uint8_t getSlotCounter() const;
+
+  // ===================== Events =====================
+
+  void addSlotHandler(HandlerFunction handler);
 
   // ===================== DatalinkI Interface =====================
 
@@ -137,7 +139,7 @@ private:
 
   // ======================= Configuration =======================
 
-  int64_t slotInterval = 10 * Core::MILLISECONDS;
+  int64_t slotInterval = 12 * Core::MILLISECONDS;
   int64_t trueSlotInterval = slotInterval;
   size_t slotsPerHop = 4;
 
@@ -157,6 +159,7 @@ private:
 
   // ----- Timing -----
   int64_t threadStart = 0;
+  bool schedulingPhase = false;
 
   /// Correction applied to the slot interval to compensate for clock
   /// frequency mismatch between TX and RX (RX side only, in nanoseconds).
@@ -173,11 +176,17 @@ private:
   bool receivedPacket = false;
   bool txSlotTrig = false;
   int64_t lastPacketRcvTime = 0;
+  bool thisSlotIsTx = false;
+  bool allowedToTx = false;
+  bool blocked = false;
+
+  Core::HandlerGroup<FHSSSlotEvent, bool, bool, FHSSState> slotHandlers;
 
   // ---- Sync state ----
   FHSSState fhssState = FHSSState::Searching;
   int64_t lastSearchHopTime = 0;
   int64_t syncedStartTime = 0;
+  size_t falseCounterCount = 0;
 
   int64_t lastTxPrint = 0;
 

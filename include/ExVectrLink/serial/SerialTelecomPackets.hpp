@@ -16,9 +16,9 @@ enum SerialPacketType : uint8_t {
   ChannelState, // If channel is blocked and max packet size
 
   SetModulationPreset, // Set the modulation preset of the radio link.
-  SetTxPower,          // Set the Tx power of the radio link. 0-20 dBm.
   SetLinkChannel,      // Set the channel of the radio link. 0-9. Stops FHSS.
   StartFHSS,           // Start FHSS. Requires 4 byte key.
+  SetPowerParams,      // Set tx power parameters.
 
   DeviceTemperature, // Send device temperature.
   FhssSyncState,     // FHSS sync status
@@ -89,17 +89,22 @@ public:
   }
 };
 
-class SerialPacket_SetTxPower {
+class SerialPacket_SetPowerParams {
 public:
-  uint8_t txPower; // Tx power in dBm.
+  uint8_t txPower;         // Tx power in dBm, set to 0 for max power.
+  bool enableDynamicPower; // If disabled, then will use txPower, if enabled,
+                           // then txPower is max power.
 
   SerialPacketType getPacketType() const {
-    return SerialPacketType::SetTxPower;
+    return SerialPacketType::SetPowerParams;
   }
   uint8_t numBytes() const { return 1; }
-  void serialize(uint8_t *buffer) const { buffer[0] = txPower; }
+  void serialize(uint8_t *buffer) const {
+    buffer[0] = (enableDynamicPower ? 0x80 : 0x00) | (txPower & 0x7F);
+  }
   bool deserialize(const uint8_t *buffer) {
-    txPower = buffer[0];
+    enableDynamicPower = (buffer[0] & 0x80) != 0;
+    txPower = buffer[0] & 0x7F;
     return true;
   }
 };
@@ -288,12 +293,13 @@ class SerialPacket_LinkInfo {
 public:
   /// Per-side link statistics (14 bytes serialised).
   struct SideStats {
-    int8_t rssi = 0;         ///< dBm (negative)
-    int8_t snr = 0;          ///< dB
-    int8_t txPower = 0;      ///< dBm
-    uint8_t antenna = 0;     ///< Active antenna index
-    uint8_t linkQuality = 0; ///< 0-100 %
-    uint8_t lossRate = 0;    ///< 0-100 % (100 = all lost)
+    int8_t rssi = 0;           ///< dBm (negative)
+    int8_t snr = 0;            ///< dB
+    int8_t txPower = 0;        ///< dBm
+    bool dynamicPower = false; ///< if dyn power enabled
+    uint8_t antenna = 0;       ///< Active antenna index
+    uint8_t linkQuality = 0;   ///< 0-100 %
+    uint8_t lossRate = 0;      ///< 0-100 % (100 = all lost)
   };
 
   SideStats local;  ///< Stats as seen / reported by this node.
@@ -307,13 +313,13 @@ public:
   void serialize(uint8_t *buffer) const {
     buffer[0] = (uint8_t)local.rssi;
     buffer[1] = (uint8_t)local.snr;
-    buffer[2] = (uint8_t)local.txPower;
+    buffer[2] = (local.dynamicPower ? 0x80 : 0x00) | (local.txPower & 0x7F);
     buffer[3] = local.antenna;
     buffer[4] = local.linkQuality;
     buffer[5] = local.lossRate;
     buffer[6] = (uint8_t)remote.rssi;
     buffer[7] = (uint8_t)remote.snr;
-    buffer[8] = (uint8_t)remote.txPower;
+    buffer[8] = (remote.dynamicPower ? 0x80 : 0x00) | (remote.txPower & 0x7F);
     buffer[9] = remote.antenna;
     buffer[10] = remote.linkQuality;
     buffer[11] = remote.lossRate;
@@ -322,13 +328,15 @@ public:
   bool deserialize(const uint8_t *buffer) {
     local.rssi = (int8_t)buffer[0];
     local.snr = (int8_t)buffer[1];
-    local.txPower = (int8_t)buffer[2];
+    local.txPower = (int8_t)(buffer[2] & 0x7F);
+    local.dynamicPower = (buffer[2] & 0x80) != 0;
     local.antenna = buffer[3];
     local.linkQuality = buffer[4];
     local.lossRate = buffer[5];
     remote.rssi = (int8_t)buffer[6];
     remote.snr = (int8_t)buffer[7];
-    remote.txPower = (int8_t)buffer[8];
+    remote.txPower = (int8_t)(buffer[8] & 0x7F);
+    remote.dynamicPower = (buffer[8] & 0x80) != 0;
     remote.antenna = buffer[9];
     remote.linkQuality = buffer[10];
     remote.lossRate = buffer[11];

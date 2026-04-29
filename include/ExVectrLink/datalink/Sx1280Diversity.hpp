@@ -67,6 +67,7 @@ public:
   void setChannel(size_t channel) override;
 
   int16_t lastPacketSNR() const override;
+  int16_t lastPacketRSSI() const;
 
   void setStartReceive(bool rxEnabled) override;
   void setEnableTxRx(bool enable) override;
@@ -92,6 +93,7 @@ private:
 
   size_t currentBestLinkIndex = 0;
   uint8_t currentBestLinkLq = 0;
+  int64_t lastbestLinkUpdateTime = 0;
 
   int64_t transmitting = 0;
   int64_t lastReceiveAcceptTime = 0;

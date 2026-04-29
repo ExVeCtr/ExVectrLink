@@ -17,7 +17,7 @@ namespace VCTR::ExVectrLink /* ExVectrLinkSerialTelecoms */ {
 
 /// @brief  Current ExVectrLink version.
 /// Will be incremented if incompatible changes have been made.
-constexpr uint8_t ExVectrLinkVersion = 8;
+constexpr uint8_t ExVectrLinkVersion = 9;
 
 class SerialTelecoms : public Core::Task_Periodic {
 private:
@@ -156,7 +156,7 @@ public:
 
   // --------------- ExVectrLinkI implementation ---------------
 
-  void setTxPower(uint8_t txPower) override;
+  void setTxPower(uint8_t txPower, bool dynamicPower) override;
 
   void setModulationPreset(
       VCTR::ExVectrLink::datalink::ModulationPresets preset) override;
