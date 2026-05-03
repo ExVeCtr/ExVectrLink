@@ -11,6 +11,7 @@ public:
   void setMinPower(uint8_t minPowerDBm);
   void setEnableDynamicPower(bool enable);
 
+  bool isDynamicPowerEnabled() const;
   int8_t getPower() const;
 
   /**
@@ -28,10 +29,10 @@ public:
   void decPower();
   void setPower(uint8_t powerDBm);
 
-  void update(bool receivedPacket, int8_t rssi, int8_t snr);
+  void update(bool receivedPacket, int8_t rssi, int8_t snr, uint8_t lq);
 
 private:
-  static constexpr int8_t powerLevels[] = {10, 12, 20, 24, 27, 33};
+  static constexpr int8_t powerLevels[] = {10, 14, 17, 20, 24, 27, 30, 33};
 
   uint8_t maxPowerDBm = 33;
   uint8_t minPowerDBm = 10;
@@ -43,7 +44,7 @@ private:
   int8_t minSnr = -1;
   uint8_t minLq = 70;
 
-  int8_t maxRssi = -80;
+  int8_t maxRssi = -110;
   int8_t maxSnr = 6;
   uint8_t maxLq = 90;
 };

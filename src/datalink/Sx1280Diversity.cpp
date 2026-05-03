@@ -28,33 +28,30 @@ void Sx1280Diversity::addDiversityLink(
     VCTR::network::datalink::Datalink_SX1280_V2 &link) {
   auto linkIndex = diversityLinks.size();
   diversityLinks.append({&link, {0, 0, 0}});
-  link.addTransmitFinishedHandler([this, linkIndex]() {
-    // transmitting = 0;
-    // startReceiveOnAllLinks();
-  });
+  // link.addTransmitFinishedHandler([this, linkIndex]() {
+  //   // transmitting = 0;
+  //   // startReceiveOnAllLinks();
+  // });
   link.addReceiveHandler(
       [this, linkIndex](const VCTR::network::DataPacket &dataframe) {
-        // if (Core::NOW() > transmitting) {
-        //   return;
+        // if (transmitting != 0) {
+        //   int64_t txDelta = dataframe.timestamp - transmitting;
+
+        //   if (txDelta <= 5 * Core::MILLISECONDS &&
+        //       txDelta >= -1 * Core::MILLISECONDS) {
+        //     return;
+        //   }
         // }
 
         // receiveHandlers_.callHandlers(dataframe);
         // return;
 
-        if (Core::NOW() - lastReceiveAcceptTime < 3 * Core::MILLISECONDS) {
-          return;
-        }
-
-        receiving = true;
-        lastReceiveAcceptTime = Core::NOW();
-
         auto &linkInfo = diversityLinks[linkIndex];
-        linkInfo.lastPacketInfo.rssi = linkInfo.lastPacketInfo.rssi * 0.8 +
-                                       linkInfo.link->lastPacketRSSI() * 0.2;
-        linkInfo.lastPacketInfo.snr = linkInfo.lastPacketInfo.snr * 0.8 +
-                                      linkInfo.link->lastPacketSNR() * 0.2;
+        linkInfo.lastPacketInfo.rssi = linkInfo.lastPacketInfo.rssi * 0.5 +
+                                       linkInfo.link->lastPacketRSSI() * 0.5;
+        linkInfo.lastPacketInfo.snr = linkInfo.lastPacketInfo.snr * 0.5 +
+                                      linkInfo.link->lastPacketSNR() * 0.5;
         linkInfo.lastPacketInfo.receivedTime = dataframe.timestamp;
-        // linkInfo.lastPacketInfo.packet = dataframe;
 
         determineBestLink();
 
@@ -137,10 +134,11 @@ bool Sx1280Diversity::transmitDataframe(
     return false;
   }
 
+  transmitting = dataframe.timestamp == 0 ? Core::NOW() : dataframe.timestamp;
+
   auto txLinkIndex = getTxLinkIndex();
   auto &txLink = diversityLinks[txLinkIndex];
-  transmitting = dataframe.timestamp;
-  // stopReceiveOnAllLinks(txLinkIndex);
+  //  stopReceiveOnAllLinks(txLinkIndex);
   return txLink.link->transmitDataframe(dataframe);
 }
 

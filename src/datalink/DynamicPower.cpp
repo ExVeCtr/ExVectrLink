@@ -49,6 +49,8 @@ void DynamicPower::setEnableDynamicPower(bool enable) {
   dynamicPowerEnabled = enable;
 }
 
+bool DynamicPower::isDynamicPowerEnabled() const { return dynamicPowerEnabled; }
+
 int8_t DynamicPower::getPower() const { return currentPowerDBm; }
 
 void DynamicPower::setIncParameters(int8_t minRssi, int8_t minSnr,
@@ -128,9 +130,10 @@ void DynamicPower::setPower(uint8_t powerDBm) {
   currentPowerDBm = selectedPower;
 }
 
-void DynamicPower::update(bool receivedPacket, int8_t rssi, int8_t snr) {
-  // Exponential moving average on packet success to estimate link quality.
-  const uint8_t instantLq = receivedPacket ? 100 : 0;
+void DynamicPower::update(bool receivedPacket, int8_t rssi, int8_t snr,
+                          uint8_t lq) {
+  // Filter real link-quality values from telemetry (0-100).
+  const uint8_t instantLq = receivedPacket ? (lq > 100 ? 100 : lq) : 0;
   static constexpr uint8_t lqWindow = 8;
   currentLq = static_cast<uint8_t>(
       ((uint16_t)currentLq * (lqWindow - 1) + instantLq) / lqWindow);

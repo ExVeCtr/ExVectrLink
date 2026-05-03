@@ -96,7 +96,6 @@ private:
   int64_t lastbestLinkUpdateTime = 0;
 
   int64_t transmitting = 0;
-  int64_t lastReceiveAcceptTime = 0;
   bool receiving = false;
 };
 

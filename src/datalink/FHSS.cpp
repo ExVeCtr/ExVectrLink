@@ -251,6 +251,8 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
     return;
   }
 
+  int64_t now = Core::NOW();
+
   size_t payloadEnd = packet.payload.size();
 
   // Read trailer (appended at the end).
@@ -264,6 +266,21 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
   if (crc != packetCrc) {
     return;
   }
+
+  // int64_t duplicateWindow =
+  //     std::max<int64_t>(1 * Core::MILLISECONDS, getAdjustedSlotInterval() /
+  //     2);
+  // bool duplicatePacket = lastReceivedPacketTime != 0 &&
+  //                        now - lastReceivedPacketTime <= duplicateWindow &&
+  //                        lastReceivedCounterByte == byte1 &&
+  //                        lastReceivedPacketCrc == packetCrc;
+  // if (duplicatePacket || thisSlotIsTx) {
+  //   return;
+  // }
+
+  lastReceivedCounterByte = byte1;
+  lastReceivedPacketCrc = packetCrc;
+  lastReceivedPacketTime = now;
 
   uint8_t txSlotCounter = byte1 & 0x03;
   uint8_t txRoleReverseCounter = (byte1 >> 2) & 0x3F;
@@ -483,8 +500,8 @@ void FHSS::timingControl() {
   // act right when the slot starts.
   int64_t nextSlotStart =
       currentSlotStart + getAdjustedSlotInterval() + slotOffsetTime;
-  setDeadline(nextSlotStart - 3 * Core::MILLISECONDS);
-  setRelease(nextSlotStart - 3 * Core::MILLISECONDS);
+  setDeadline(nextSlotStart - 2 * Core::MILLISECONDS);
+  setRelease(nextSlotStart - 2 * Core::MILLISECONDS);
 
   schedulingPhase = true;
 }

@@ -120,7 +120,7 @@ private:
 
   /// @brief Number of trailer bytes appended to each outgoing frame.
   /// Layout: 1 bit data flag | 7 bits Quality | 4 bit slotCounter | 4 bit key
-  // static constexpr size_t TRAILER_SIZE = 2;
+  static constexpr size_t TRAILER_SIZE = 3;
 
   // ---- Internal methods ----
   void generateChannelSequence(uint8_t key);
@@ -187,6 +187,9 @@ private:
   int64_t lastSearchHopTime = 0;
   int64_t syncedStartTime = 0;
   size_t falseCounterCount = 0;
+  uint8_t lastReceivedCounterByte = 0;
+  uint8_t lastReceivedPacketCrc = 0;
+  int64_t lastReceivedPacketTime = 0;
 
   int64_t lastTxPrint = 0;
 
