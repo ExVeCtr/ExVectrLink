@@ -139,7 +139,7 @@ private:
 
   // ======================= Configuration =======================
 
-  int64_t slotInterval = 12 * Core::MILLISECONDS;
+  int64_t slotInterval = 15 * Core::MILLISECONDS;
   int64_t trueSlotInterval = slotInterval;
   size_t slotsPerHop = 4;
 

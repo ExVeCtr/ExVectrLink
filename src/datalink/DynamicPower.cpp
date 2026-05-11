@@ -41,6 +41,14 @@ void DynamicPower::setMinPower(uint8_t minPowerDBm) {
   setPower(currentPowerDBm);
 }
 
+void DynamicPower::setDynMaxPower(uint8_t maxPowerDBm) {
+  this->maxDynPowerDBm = maxPowerDBm;
+}
+
+void DynamicPower::setDynMinPower(uint8_t minPowerDBm) {
+  this->minDynPowerDBm = minPowerDBm;
+}
+
 void DynamicPower::setEnableDynamicPower(bool enable) {
   dynamicPowerEnabled = enable;
 }
@@ -85,7 +93,7 @@ void DynamicPower::decPower() {
     }
 
     if (level >= minPowerDBm && level <= maxPowerDBm) {
-      lastDecTime = VCTR::Core::NOW();
+      lastDecTime = VCTR::Core::Now();
       setPower(level);
     }
     return;
@@ -120,25 +128,33 @@ void DynamicPower::setPower(uint8_t powerDBm) {
 
 void DynamicPower::update(bool receivedPacket, int8_t rssi, int8_t snr,
                           uint8_t lq) {
-  // Filter real link-quality values from telemetry (0-100).
-  const uint8_t instantLq = receivedPacket ? (lq > 100 ? 100 : lq) : 0;
-  static constexpr uint8_t lqWindow = 8;
-  currentLq = static_cast<uint8_t>(
-      ((uint16_t)currentLq * (lqWindow - 1) + instantLq) / lqWindow);
 
   if (!dynamicPowerEnabled) {
     return;
   }
 
-  const bool shouldIncrease =
-      (rssi < minRssi) || (snr < minSnr) || (currentLq < minLq);
-  const bool shouldDecrease =
-      (rssi > maxRssi) && (snr > maxSnr) && (currentLq > maxLq);
+  if (!receivedPacket && missedPacketCount < 10) {
+    missedPacketCount++;
+  } else {
+    missedPacketCount = 0;
+  }
 
-  if (shouldIncrease) {
+  bool missedPacketInc = false;
+  if (!receivedPacket && missedPacketCount >= 2) {
+    missedPacketInc = true;
+  }
+
+  const bool shouldIncrease = (rssi < minRssi) || (snr < minSnr) ||
+                              (lq < minLq) || missedPacketInc ||
+                              currentPowerDBm < minDynPowerDBm;
+  const bool shouldDecrease =
+      (rssi > maxRssi) && (snr > maxSnr) && (lq > maxLq) && receivedPacket ||
+      currentPowerDBm > maxDynPowerDBm;
+
+  if (shouldIncrease && currentPowerDBm < maxDynPowerDBm) {
     incPower();
-  } else if (shouldDecrease &&
-             (VCTR::Core::NOW() - lastDecTime) > 1 * VCTR::Core::SECONDS) {
+  } else if (shouldDecrease && currentPowerDBm > minDynPowerDBm &&
+             (VCTR::Core::Now() - lastDecTime) > 1 * VCTR::Core::SECONDS) {
     decPower();
   }
 }

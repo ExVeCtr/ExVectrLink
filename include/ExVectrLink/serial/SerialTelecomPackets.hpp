@@ -91,20 +91,27 @@ public:
 
 class SerialPacket_SetPowerParams {
 public:
-  uint8_t txPower;         // Tx power in dBm, set to 0 for max power.
+  uint8_t txPower; // Tx power in dBm, set to 0 for max power.
+  uint8_t
+      maxDynPower; // Max power the dynamic power system will use. 0 for max.
+  uint8_t minDynPower;     // Min power the dynamic power system will use.
   bool enableDynamicPower; // If disabled, then will use txPower, if enabled,
                            // then txPower is max power.
 
   SerialPacketType getPacketType() const {
     return SerialPacketType::SetPowerParams;
   }
-  uint8_t numBytes() const { return 1; }
+  uint8_t numBytes() const { return 3; }
   void serialize(uint8_t *buffer) const {
     buffer[0] = (enableDynamicPower ? 0x80 : 0x00) | (txPower & 0x7F);
+    buffer[1] = maxDynPower;
+    buffer[2] = minDynPower;
   }
   bool deserialize(const uint8_t *buffer) {
     enableDynamicPower = (buffer[0] & 0x80) != 0;
     txPower = buffer[0] & 0x7F;
+    maxDynPower = buffer[1];
+    minDynPower = buffer[2];
     return true;
   }
 };

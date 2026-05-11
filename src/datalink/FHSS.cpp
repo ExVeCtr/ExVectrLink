@@ -185,8 +185,8 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
 
       auto lqThres = 1.0f - 1.0f / (float)slotsPerHop;
       if (slotTimingOffset > slotInterval / 10) {
-        syncedStartTime = Core::NOW();
-      } else if (Core::NOW() - syncedStartTime > 500 * Core::MILLISECONDS &&
+        syncedStartTime = Core::Now();
+      } else if (Core::Now() - syncedStartTime > 500 * Core::MILLISECONDS &&
                  linkQuality > lqThres && linkQuality > 0.5f) {
         fhssState = FHSSState::Synced;
       }
@@ -215,7 +215,7 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
 void FHSS::hopChannel(bool reverse) {
   if (channelSequence.size() == 0)
     return;
-  lastChannelHopTime = Core::NOW();
+  lastChannelHopTime = Core::Now();
   if (reverse) {
     if (currentChannelIdx == 0) {
       currentChannelIdx = channelSequence.size();
@@ -251,7 +251,7 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
     return;
   }
 
-  int64_t now = Core::NOW();
+  int64_t now = Core::Now();
 
   size_t payloadEnd = packet.payload.size();
 
@@ -334,28 +334,28 @@ void FHSS::taskInit() {
 
   radioLink.setEnableAutoRx(false);
 
-  currentSlotStart = Core::NOW();
+  currentSlotStart = Core::Now();
 }
 
 void FHSS::taskCheck() {}
 
 void FHSS::taskThread() {
 
-  threadStart = Core::NOW() - slotOffsetTime;
+  threadStart = Core::Now() - slotOffsetTime;
 
   timingControl();
 
   // --- Searching mode (RX side only) ---
   // In searching mode, slowly hop through channels trying to find a signal.
   if (isRxSide && fhssState == FHSSState::Synced &&
-      Core::NOW() - lastPacketRcvTime > 3 * Core::SECONDS) {
+      Core::Now() - lastPacketRcvTime > 3 * Core::SECONDS) {
     fhssState = FHSSState::Searching;
     intervalCorrection = 0;
     slotOffsetTime = 0;
     slotTimingOffset = 0;
     receiveSuccesses.clear();
   } else if (isRxSide && fhssState == FHSSState::Syncing &&
-             Core::NOW() - lastPacketRcvTime > 0.5 * Core::SECONDS) {
+             Core::Now() - lastPacketRcvTime > 0.5 * Core::SECONDS) {
     fhssState = FHSSState::Searching;
     intervalCorrection = 0;
     slotOffsetTime = 0;
@@ -368,7 +368,7 @@ void FHSS::taskThread() {
 
   // --- Sync Info for tx side ---
   if (!isRxSide) {
-    fhssState = (Core::NOW() - lastPacketRcvTime > 1 * Core::SECONDS)
+    fhssState = (Core::Now() - lastPacketRcvTime > 1 * Core::SECONDS)
                     ? FHSSState::Searching
                     : FHSSState::Synced;
   }
@@ -399,7 +399,7 @@ void FHSS::updateLinkQuality() {
     // otherEndLinkQuality = 0;
   }
 
-  if (Core::NOW() - lastPacketRcvTime > 1 * Core::SECONDS) {
+  if (Core::Now() - lastPacketRcvTime > 1 * Core::SECONDS) {
     otherEndLinkQuality = 0;
   }
 }
