@@ -1,12 +1,17 @@
 #ifndef EXVECRLINK_DYNAMICPOWER_HPP
 #define EXVECRLINK_DYNAMICPOWER_HPP
 
+#include <cstddef>
 #include <cstdint>
 
 namespace VCTR::ExVectrLink::datalink {
 
 class DynamicPower {
 public:
+  static constexpr uint8_t kPowerLevels[] = {10, 14, 17, 20, 24, 27, 30, 33};
+  static constexpr size_t kNumPowerLevels =
+      sizeof(kPowerLevels) / sizeof(kPowerLevels[0]);
+
   void setMaxPower(uint8_t maxPowerDBm);
   void setMinPower(uint8_t minPowerDBm);
   void setEnableDynamicPower(bool enable);
@@ -32,16 +37,15 @@ public:
   void update(bool receivedPacket, int8_t rssi, int8_t snr, uint8_t lq);
 
 private:
-  static constexpr int8_t powerLevels[] = {10, 14, 17, 20, 24, 27, 30, 33};
-
   uint8_t maxPowerDBm = 33;
   uint8_t minPowerDBm = 10;
   uint8_t currentPowerDBm = minPowerDBm;
   uint8_t currentLq = 100;
   bool dynamicPowerEnabled = true;
+  int64_t lastDecTime = 0;
 
   int8_t minRssi = -100;
-  int8_t minSnr = -1;
+  int8_t minSnr = 1;
   uint8_t minLq = 70;
 
   int8_t maxRssi = -110;

@@ -1,17 +1,16 @@
 #include <stddef.h>
 
+#include "ExVectrCore/time_definitions.hpp"
+
 #include "ExVectrLink/datalink/DynamicPower.hpp"
 
 namespace VCTR::ExVectrLink::datalink {
 
 void DynamicPower::setMaxPower(uint8_t maxPowerDBm) {
-  constexpr size_t numPowerLevels =
-      sizeof(powerLevels) / sizeof(powerLevels[0]);
-
-  uint8_t snappedMax = powerLevels[0];
-  for (size_t i = 0; i < numPowerLevels; i++) {
-    if (powerLevels[i] <= maxPowerDBm) {
-      snappedMax = powerLevels[i];
+  uint8_t snappedMax = kPowerLevels[0];
+  for (size_t i = 0; i < kNumPowerLevels; i++) {
+    if (kPowerLevels[i] <= maxPowerDBm) {
+      snappedMax = kPowerLevels[i];
       continue;
     }
     break;
@@ -26,13 +25,10 @@ void DynamicPower::setMaxPower(uint8_t maxPowerDBm) {
 }
 
 void DynamicPower::setMinPower(uint8_t minPowerDBm) {
-  constexpr size_t numPowerLevels =
-      sizeof(powerLevels) / sizeof(powerLevels[0]);
-
-  uint8_t snappedMin = powerLevels[numPowerLevels - 1];
-  for (size_t i = 0; i < numPowerLevels; i++) {
-    if (powerLevels[i] >= minPowerDBm) {
-      snappedMin = powerLevels[i];
+  uint8_t snappedMin = kPowerLevels[kNumPowerLevels - 1];
+  for (size_t i = 0; i < kNumPowerLevels; i++) {
+    if (kPowerLevels[i] >= minPowerDBm) {
+      snappedMin = kPowerLevels[i];
       break;
     }
   }
@@ -68,11 +64,8 @@ void DynamicPower::setDecParameters(int8_t maxRssi, int8_t maxSnr,
 }
 
 void DynamicPower::incPower() {
-  constexpr size_t numPowerLevels =
-      sizeof(powerLevels) / sizeof(powerLevels[0]);
-
-  for (size_t i = 0; i < numPowerLevels; i++) {
-    const uint8_t level = powerLevels[i];
+  for (size_t i = 0; i < kNumPowerLevels; i++) {
+    const uint8_t level = kPowerLevels[i];
     if (level <= currentPowerDBm) {
       continue;
     }
@@ -85,16 +78,14 @@ void DynamicPower::incPower() {
 }
 
 void DynamicPower::decPower() {
-  constexpr size_t numPowerLevels =
-      sizeof(powerLevels) / sizeof(powerLevels[0]);
-
-  for (size_t i = numPowerLevels; i > 0; i--) {
-    const uint8_t level = powerLevels[i - 1];
+  for (size_t i = kNumPowerLevels; i > 0; i--) {
+    const uint8_t level = kPowerLevels[i - 1];
     if (level >= currentPowerDBm) {
       continue;
     }
 
     if (level >= minPowerDBm && level <= maxPowerDBm) {
+      lastDecTime = VCTR::Core::NOW();
       setPower(level);
     }
     return;
@@ -102,9 +93,6 @@ void DynamicPower::decPower() {
 }
 
 void DynamicPower::setPower(uint8_t powerDBm) {
-  constexpr size_t numPowerLevels =
-      sizeof(powerLevels) / sizeof(powerLevels[0]);
-
   uint8_t boundedMin = minPowerDBm;
   uint8_t boundedMax = maxPowerDBm;
   if (boundedMin > boundedMax) {
@@ -114,8 +102,8 @@ void DynamicPower::setPower(uint8_t powerDBm) {
   }
 
   uint8_t selectedPower = boundedMin;
-  for (size_t i = 0; i < numPowerLevels; i++) {
-    const uint8_t level = powerLevels[i];
+  for (size_t i = 0; i < kNumPowerLevels; i++) {
+    const uint8_t level = kPowerLevels[i];
     if (level < boundedMin || level > boundedMax) {
       continue;
     }
@@ -149,7 +137,8 @@ void DynamicPower::update(bool receivedPacket, int8_t rssi, int8_t snr,
 
   if (shouldIncrease) {
     incPower();
-  } else if (shouldDecrease) {
+  } else if (shouldDecrease &&
+             (VCTR::Core::NOW() - lastDecTime) > 1 * VCTR::Core::SECONDS) {
     decPower();
   }
 }
