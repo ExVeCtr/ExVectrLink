@@ -53,12 +53,12 @@ void SerialTelecoms::taskInit() {
 
 void SerialTelecoms::taskCheck() {
   if (serialPort.readable() > 0 || sendDataBuffer.size() > 0) {
-    setDeadline(Core::Now());
+    setDeadline(Core::NowNs());
   }
 }
 
 void SerialTelecoms::taskThread() {
-  int64_t loopStart = Core::Now();
+  int64_t loopStart = Core::NowNs();
 
   const auto bufferSize = 10;
   auto readData = [this, &loopStart]() {
@@ -66,7 +66,7 @@ void SerialTelecoms::taskThread() {
     uint8_t readBuffer[bufferSize];
     size_t available;
     while ((available = serialPort.readable()) > 0 &&
-           Core::Now() - loopStart < 1 * Core::MILLISECONDS) {
+           Core::NowNs() - loopStart < 1 * Core::MILLISECONDS) {
       lastSerialByteTime = loopStart;
       size_t toRead =
           available < sizeof(readBuffer) ? available : sizeof(readBuffer);
@@ -81,10 +81,15 @@ void SerialTelecoms::taskThread() {
   auto writeData = [this, &loopStart]() {
     uint8_t writeBuffer[bufferSize];
     while (sendDataBuffer.size() > 0 &&
-           Core::Now() - loopStart < 1 * Core::MILLISECONDS) {
+           Core::NowNs() - loopStart < 1 * Core::MILLISECONDS &&
+           serialPort.writable() > 0) {
       size_t toSend = sendDataBuffer.size();
+      size_t writable = serialPort.writable();
       size_t chunkSize =
           toSend < sizeof(writeBuffer) ? toSend : sizeof(writeBuffer);
+      if (chunkSize > writable) {
+        chunkSize = writable;
+      }
       for (size_t i = 0; i < chunkSize; i++) {
         writeBuffer[i] = sendDataBuffer[i];
       }
@@ -157,7 +162,7 @@ void SerialTelecoms::sendSerialPacket(const SerialPacketType &type,
     sendDataBuffer.placeBack(((uint8_t *)data)[i]);
   }
   sendDataBuffer.placeBack(static_cast<uint8_t>(SerialByteType::EndByte));
-  lastPacketSendTime = Core::Now();
+  lastPacketSendTime = Core::NowNs();
 }
 
 void SerialTelecoms::sendSerialPacket(const SerialPacketType &type,
@@ -172,9 +177,9 @@ bool SerialTelecoms::isOtherEndConnected() const {
 }
 
 void SerialTelecoms::forcePacketSendNow(int64_t timeout) {
-  auto start = Core::Now();
+  auto start = Core::NowNs();
   uint8_t writeBuffer[256];
-  while (sendDataBuffer.size() > 0 && Core::Now() - start < timeout) {
+  while (sendDataBuffer.size() > 0 && Core::NowNs() - start < timeout) {
     size_t toSend = sendDataBuffer.size();
     size_t chunkSize =
         toSend < sizeof(writeBuffer) ? toSend : sizeof(writeBuffer);
@@ -219,7 +224,7 @@ void SerialTelecoms::decodeSerialByte(uint8_t incomingByte) {
   case SerialReadState::ReadingPacketData:
     if (incomingByte == SerialByteType::EndByte) {
       serialReadState = SerialReadState::WaitingForStartByteA;
-      lastValidPacketTime = Core::Now();
+      lastValidPacketTime = Core::NowNs();
       isSerialConnected = true;
       // Process the packet
       for (size_t i = 0; i < serialPacketHandlers.size(); i++) {
