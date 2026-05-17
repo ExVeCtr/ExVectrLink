@@ -307,16 +307,17 @@ public:
     uint8_t antenna = 0;       ///< Active antenna index
     uint8_t linkQuality = 0;   ///< 0-100 %
     uint8_t lossRate = 0;      ///< 0-100 % (100 = all lost)
+    int32_t deviceTime = 0;    ///< Remote device time in s
+    uint16_t desyncCount = 0;  ///< FHSS desync count
   };
 
   SideStats local;  ///< Stats as seen / reported by this node.
   SideStats remote; ///< Stats received from the far end via OTA LinkTelemetry.
-  bool remoteValid = false;     ///< True once at least one OTA packet received.
-  int32_t remoteDeviceTime = 0; ///< The other sides local time in seconds.
+  bool remoteValid = false; ///< True once at least one OTA packet received.
 
   SerialPacketType getPacketType() const { return SerialPacketType::LinkInfo; }
   // 6 bytes × 2 sides + 1 valid flag + 4 bytes remoteDeviceTime = 17 bytes
-  uint8_t numBytes() const { return 17; }
+  uint8_t numBytes() const { return 25; }
 
   void serialize(uint8_t *buffer) const {
     buffer[0] = (uint8_t)local.rssi;
@@ -325,17 +326,25 @@ public:
     buffer[3] = local.antenna;
     buffer[4] = local.linkQuality;
     buffer[5] = local.lossRate;
-    buffer[6] = (uint8_t)remote.rssi;
-    buffer[7] = (uint8_t)remote.snr;
-    buffer[8] = (remote.dynamicPower ? 0x80 : 0x00) | (remote.txPower & 0x7F);
-    buffer[9] = remote.antenna;
-    buffer[10] = remote.linkQuality;
-    buffer[11] = remote.lossRate;
-    buffer[12] = remoteValid ? 1 : 0;
-    buffer[13] = (uint8_t)(remoteDeviceTime & 0xFF);
-    buffer[14] = (uint8_t)((remoteDeviceTime >> 8) & 0xFF);
-    buffer[15] = (uint8_t)((remoteDeviceTime >> 16) & 0xFF);
-    buffer[16] = (uint8_t)((remoteDeviceTime >> 24) & 0xFF);
+    buffer[6] = local.deviceTime & 0xFF;
+    buffer[7] = (local.deviceTime >> 8) & 0xFF;
+    buffer[8] = (local.deviceTime >> 16) & 0xFF;
+    buffer[9] = (local.deviceTime >> 24) & 0xFF;
+    buffer[10] = local.desyncCount & 0xFF;
+    buffer[11] = (local.desyncCount >> 8) & 0xFF;
+    buffer[12] = (uint8_t)remote.rssi;
+    buffer[13] = (uint8_t)remote.snr;
+    buffer[14] = (remote.dynamicPower ? 0x80 : 0x00) | (remote.txPower & 0x7F);
+    buffer[15] = remote.antenna;
+    buffer[16] = remote.linkQuality;
+    buffer[17] = remote.lossRate;
+    buffer[18] = (uint8_t)(remote.deviceTime & 0xFF);
+    buffer[19] = (uint8_t)((remote.deviceTime >> 8) & 0xFF);
+    buffer[20] = (uint8_t)((remote.deviceTime >> 16) & 0xFF);
+    buffer[21] = (uint8_t)((remote.deviceTime >> 24) & 0xFF);
+    buffer[22] = (uint8_t)(remote.desyncCount & 0xFF);
+    buffer[23] = (uint8_t)((remote.desyncCount >> 8) & 0xFF);
+    buffer[24] = remoteValid ? 1 : 0;
   }
   bool deserialize(const uint8_t *buffer) {
     local.rssi = (int8_t)buffer[0];
@@ -345,18 +354,24 @@ public:
     local.antenna = buffer[3];
     local.linkQuality = buffer[4];
     local.lossRate = buffer[5];
-    remote.rssi = (int8_t)buffer[6];
-    remote.snr = (int8_t)buffer[7];
-    remote.txPower = (int8_t)(buffer[8] & 0x7F);
-    remote.dynamicPower = (buffer[8] & 0x80) != 0;
-    remote.antenna = buffer[9];
-    remote.linkQuality = buffer[10];
-    remote.lossRate = buffer[11];
-    remoteValid = buffer[12] == 1;
-    remoteDeviceTime = static_cast<int32_t>(buffer[13]) |
-                       (static_cast<int32_t>(buffer[14]) << 8) |
-                       (static_cast<int32_t>(buffer[15]) << 16) |
-                       (static_cast<int32_t>(buffer[16]) << 24);
+    local.deviceTime = static_cast<int32_t>(buffer[6]) |
+                       (static_cast<int32_t>(buffer[7]) << 8) |
+                       (static_cast<int32_t>(buffer[8]) << 16) |
+                       (static_cast<int32_t>(buffer[9]) << 24);
+    local.desyncCount = (uint16_t)buffer[10] | ((uint16_t)buffer[11] << 8);
+    remote.rssi = (int8_t)buffer[12];
+    remote.snr = (int8_t)buffer[13];
+    remote.txPower = (int8_t)(buffer[14] & 0x7F);
+    remote.dynamicPower = (buffer[14] & 0x80) != 0;
+    remote.antenna = buffer[15];
+    remote.linkQuality = buffer[16];
+    remote.lossRate = buffer[17];
+    remote.deviceTime = static_cast<int32_t>(buffer[18]) |
+                        (static_cast<int32_t>(buffer[19]) << 8) |
+                        (static_cast<int32_t>(buffer[20]) << 16) |
+                        (static_cast<int32_t>(buffer[21]) << 24);
+    remote.desyncCount = (uint16_t)buffer[22] | ((uint16_t)buffer[23] << 8);
+    remoteValid = buffer[24] == 1;
     return true;
   }
 };
