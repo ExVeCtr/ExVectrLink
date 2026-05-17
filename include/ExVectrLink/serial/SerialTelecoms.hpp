@@ -17,7 +17,7 @@ namespace VCTR::ExVectrLink /* ExVectrLinkSerialTelecoms */ {
 
 /// @brief  Current ExVectrLink version.
 /// Will be incremented if incompatible changes have been made.
-constexpr uint8_t ExVectrLinkVersion = 10;
+constexpr uint8_t ExVectrLinkVersion = 12;
 
 class SerialTelecoms : public Core::Task_Periodic {
 private:
@@ -51,6 +51,8 @@ public:
   void taskInit() override;
   void taskCheck() override;
   void taskThread() override;
+
+  void setDisabled();
 
   void addSerialPacketHandler(
       const VCTR::ExVectrLink::packets::SerialPacketType &type,
@@ -125,6 +127,8 @@ private:
   bool isOtherEndSerialConnected = false;
 
   bool readWriteSwitch = false;
+
+  bool disabled = false;
 };
 
 } // namespace VCTR::ExVectrLink

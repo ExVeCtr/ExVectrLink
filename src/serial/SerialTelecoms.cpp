@@ -29,6 +29,9 @@ SerialTelecoms::SerialTelecoms(HAL::DigitalIO &serialPort)
 }
 
 void SerialTelecoms::taskInit() {
+  if (disabled) {
+    return;
+  }
   serialReadState = SerialReadState::WaitingForStartByteA;
   recievePacketData.clear();
 
@@ -52,12 +55,18 @@ void SerialTelecoms::taskInit() {
 }
 
 void SerialTelecoms::taskCheck() {
+  if (disabled) {
+    return;
+  }
   if (serialPort.readable() > 0 || sendDataBuffer.size() > 0) {
     setDeadline(Core::NowNs());
   }
 }
 
 void SerialTelecoms::taskThread() {
+  if (disabled) {
+    return;
+  }
   int64_t loopStart = Core::NowNs();
 
   const auto bufferSize = 10;
@@ -134,14 +143,22 @@ void SerialTelecoms::taskThread() {
   lastLoopTime = loopStart;
 }
 
+void SerialTelecoms::setDisabled() { disabled = true; }
+
 void SerialTelecoms::addSerialPacketHandler(
     const SerialPacketType &type,
     std::function<void(const Core::ListArray<uint8_t> &data)> handler) {
+  if (disabled) {
+    return;
+  }
   serialPacketHandlers.append({type, handler});
 }
 
 void SerialTelecoms::sendSerialPacket(const SerialPacketType &type,
                                       const void *data, size_t numBytes) {
+  if (disabled) {
+    return;
+  }
   if (numBytes > 255) {
     LOG_MSG("Packet data was over 255 bytes. Not sending packet. \n");
     return;
@@ -177,6 +194,9 @@ bool SerialTelecoms::isOtherEndConnected() const {
 }
 
 void SerialTelecoms::forcePacketSendNow(int64_t timeout) {
+  if (disabled) {
+    return;
+  }
   auto start = Core::NowNs();
   uint8_t writeBuffer[256];
   while (sendDataBuffer.size() > 0 && Core::NowNs() - start < timeout) {
@@ -194,6 +214,9 @@ void SerialTelecoms::forcePacketSendNow(int64_t timeout) {
 }
 
 void SerialTelecoms::decodeSerialByte(uint8_t incomingByte) {
+  if (disabled) {
+    return;
+  }
   switch (serialReadState) {
   case SerialReadState::WaitingForStartByteA:
     if (incomingByte == SerialByteType::StartByteA) {
@@ -246,6 +269,9 @@ void SerialTelecoms::decodeSerialByte(uint8_t incomingByte) {
 }
 
 void SerialTelecoms::setPortBaudRate(uint32_t baudrate) {
+  if (disabled) {
+    return;
+  }
   this->baudrate = baudrate;
   serialPort.setInputParam(HAL::IO_PARAM_t::SPEED, baudrate);
   serialPort.setOutputParam(HAL::IO_PARAM_t::SPEED, baudrate);
@@ -309,6 +335,8 @@ void SerialTelecomsDatalink::addHandlers() {
         linkinfo.remoteLinkQuality = packet.remote.linkQuality;
         linkinfo.remoteTxPower = packet.remote.txPower;
         linkinfo.remoteValid = packet.remoteValid;
+        linkinfo.remoteDeviceTime = packet.remoteDeviceTime;
+        linkinfo.remoteDesyncCount = packet.remoteDesyncCount;
         linkinfo.dualLinkMode = false;
       });
 
@@ -321,8 +349,12 @@ void SerialTelecomsDatalink::addHandlers() {
 }
 
 void SerialTelecomsDatalink::setTxPower(uint8_t txPower, bool dynamicPower) {
-  telecoms.sendSerialPacket<SerialPacket_SetPowerParams>(
-      SerialPacket_SetPowerParams{txPower, dynamicPower});
+  SerialPacket_SetPowerParams packet{};
+  packet.txPower = txPower;
+  packet.maxDynPower = 0;
+  packet.minDynPower = 0;
+  packet.enableDynamicPower = dynamicPower;
+  telecoms.sendSerialPacket<SerialPacket_SetPowerParams>(packet);
 }
 
 void SerialTelecomsDatalink::setModulationPreset(

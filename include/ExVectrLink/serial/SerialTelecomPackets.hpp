@@ -313,10 +313,11 @@ public:
   SideStats remote; ///< Stats received from the far end via OTA LinkTelemetry.
   bool remoteValid = false;     ///< True once at least one OTA packet received.
   int32_t remoteDeviceTime = 0; ///< The other sides local time in seconds.
+  uint16_t remoteDesyncCount = 0; ///< The far ends FHSS desync counter.
 
   SerialPacketType getPacketType() const { return SerialPacketType::LinkInfo; }
-  // 6 bytes × 2 sides + 1 valid flag + 4 bytes remoteDeviceTime = 17 bytes
-  uint8_t numBytes() const { return 17; }
+  // 6 bytes × 2 sides + 1 valid flag + 4 bytes time + 2 bytes desyncs.
+  uint8_t numBytes() const { return 19; }
 
   void serialize(uint8_t *buffer) const {
     buffer[0] = (uint8_t)local.rssi;
@@ -336,6 +337,8 @@ public:
     buffer[14] = (uint8_t)((remoteDeviceTime >> 8) & 0xFF);
     buffer[15] = (uint8_t)((remoteDeviceTime >> 16) & 0xFF);
     buffer[16] = (uint8_t)((remoteDeviceTime >> 24) & 0xFF);
+    buffer[17] = (uint8_t)(remoteDesyncCount & 0xFF);
+    buffer[18] = (uint8_t)((remoteDesyncCount >> 8) & 0xFF);
   }
   bool deserialize(const uint8_t *buffer) {
     local.rssi = (int8_t)buffer[0];
@@ -357,6 +360,8 @@ public:
                        (static_cast<int32_t>(buffer[14]) << 8) |
                        (static_cast<int32_t>(buffer[15]) << 16) |
                        (static_cast<int32_t>(buffer[16]) << 24);
+    remoteDesyncCount = static_cast<uint16_t>(buffer[17]) |
+                        (static_cast<uint16_t>(buffer[18]) << 8);
     return true;
   }
 };
