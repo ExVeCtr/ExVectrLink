@@ -335,8 +335,6 @@ void SerialTelecomsDatalink::addHandlers() {
         linkinfo.remoteLinkQuality = packet.remote.linkQuality;
         linkinfo.remoteTxPower = packet.remote.txPower;
         linkinfo.remoteValid = packet.remoteValid;
-        linkinfo.remoteDeviceTime = packet.remoteDeviceTime;
-        linkinfo.remoteDesyncCount = packet.remoteDesyncCount;
         linkinfo.dualLinkMode = false;
       });
 
