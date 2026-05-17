@@ -41,6 +41,8 @@ struct LinkInfo {
   uint8_t remoteLinkQuality = 0;
   int8_t remoteTxPower = 0;
   bool remoteValid = false;
+  int32_t remoteDeviceTime = 0;
+  uint16_t remoteDesyncCount = 0;
 
   bool dualLinkMode = false;
 };
