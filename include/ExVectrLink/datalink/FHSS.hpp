@@ -8,6 +8,7 @@
 
 #include "ExVectrNetwork/DataPacket.hpp"
 #include "ExVectrNetwork/datalink/RadioI.hpp"
+#include "ExVectrNetwork/datalink/sx1280/Sx1280_Direct.hpp"
 
 namespace VCTR::ExVectrLink::datalink {
 
@@ -57,7 +58,7 @@ private:
       FHSSSlotEvent, bool isRxSlot, bool receivedPacket, FHSSState fhssState)>;
 
 public:
-  FHSS(VCTR::network::datalink::RadioI &radioI);
+  FHSS(VCTR::network::datalink::Sx1280_DirectI &radio);
 
   // ===================== Configuration =====================
 
@@ -131,7 +132,8 @@ private:
   void syncTimer(int64_t receiveStartTime);
   void hopChannel(bool reverse = false);
 
-  void transmitDataPacket(network::DataPacket &packetData);
+  void transmitDataPacket(network::DataPacket &packetData,
+                          int64_t txTargetTime);
   void receivePacket(const network::DataPacket &packet);
 
   void updateLinkQuality();
@@ -152,7 +154,7 @@ private:
 
   // ===================== State =====================
 
-  VCTR::network::datalink::RadioI &radioLink;
+  VCTR::network::datalink::Sx1280_DirectI &radioLink;
 
   // ---- Channel sequence ----
   VCTR::Core::ListArray<uint8_t> channelSequence;
@@ -196,6 +198,9 @@ private:
 
   uint32_t desyncCounter = 0;
   int64_t lastTxPrint = 0;
+
+  // ---- Poll-based RX tracking ----
+  uint32_t lastSeenRxPacketCount = 0;
 
   // ---- Packet data ----
   VCTR::network::DataPacket packetToSend;

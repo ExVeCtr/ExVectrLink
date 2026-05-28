@@ -16,9 +16,9 @@ namespace VCTR::ExVectrLink::datalink {
 // Construction
 // =============================================================================
 
-FHSS::FHSS(VCTR::network::datalink::RadioI &radioI)
-    : Core::Task_Periodic("FHSS", 100 * Core::MILLISECONDS), radioLink(radioI) {
-  setPriority(500);
+FHSS::FHSS(VCTR::network::datalink::Sx1280_DirectI &radio)
+    : Core::Task_Periodic("FHSS", 100 * Core::MILLISECONDS), radioLink(radio) {
+  setPriority(5000);
   Core::getSystemScheduler().addTask(*this);
 }
 
@@ -146,7 +146,7 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
   // The modulo wrapping makes the phase error independent of how many
   // slots have elapsed since then.
 
-  receiveStartTime -= 000 * Core::MICROSECONDS;
+  receiveStartTime -= 300 * Core::MICROSECONDS;
 
   int64_t referenceSlotStart = currentSlotStart;
   int64_t estimatedSlotStart = receiveStartTime - slotOffsetTime;
@@ -230,7 +230,8 @@ void FHSS::hopChannel(bool reverse) {
   radioLink.setChannel(channelSequence[currentChannelIdx]);
 }
 
-void FHSS::transmitDataPacket(network::DataPacket &packetData) {
+void FHSS::transmitDataPacket(network::DataPacket &packetData,
+                              int64_t txTargetTime) {
 
   auto slotCounterBuf = slotCounter % slotsPerHop;
   auto roleReverseBuf = (roleReverseCounter) % numTxPacketsToRx;
@@ -245,7 +246,16 @@ void FHSS::transmitDataPacket(network::DataPacket &packetData) {
   }
 
   packetData.payload.append((uint8_t)crc);
-  radioLink.transmitDataframe(packetData);
+
+  if (radioLink.setupTxPacket(packetData)) {
+    // Load the TX FIFO early (SPI-heavy) so only startTx() remains at the
+    // slot boundary.
+    radioLink.push();
+    // Busy-wait until the exact slot start time for precise TX alignment.
+    while (Core::NowNs() < txTargetTime) {
+    }
+    radioLink.startTx();
+  }
   packetData.payload.clear();
 }
 
@@ -329,11 +339,6 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
 // =============================================================================
 
 void FHSS::taskInit() {
-  // Register receive handler on the underlying radio link.
-  radioLink.addReceiveHandler(
-      [this](const network::DataPacket &packet) { receivePacket(packet); });
-
-  // Initialise timing.
   slotCounter = 0;
 
   generateChannelSequence(key);
@@ -343,14 +348,27 @@ void FHSS::taskInit() {
     radioLink.setChannel(channelSequence[0]);
   }
 
-  radioLink.setEnableAutoRx(false);
+  radioLink.configureRadio();
+  lastSeenRxPacketCount = radioLink.getRxPacketCount();
 
   currentSlotStart = Core::NowNs();
+
+  // Start listening.
+  radioLink.push();
+  radioLink.startRx(0xFFFF);
 }
 
 void FHSS::taskCheck() {}
 
 void FHSS::taskThread() {
+
+  // Poll the radio for any completed RX operations.
+  radioLink.pull();
+  const uint32_t newRxCount = radioLink.getRxPacketCount();
+  if (newRxCount != lastSeenRxPacketCount) {
+    lastSeenRxPacketCount = newRxCount;
+    receivePacket(radioLink.getRxPacket());
+  }
 
   threadStart = Core::NowNs() - slotOffsetTime;
 
@@ -497,15 +515,15 @@ void FHSS::timingControl() {
 
   // --- TX or RX ---
   allowedToTx = !isRxSide || fhssState == FHSSState::Synced;
-  blocked =
-      radioLink.isChannelBlocked(); // || packetToSend.payload.size() == 0;
+  blocked = false; // Sx1280_Direct is always ready; we control timing directly.
 
   if (thisSlotIsTx && allowedToTx && !blocked) {
     int64_t nextSlotStart = currentSlotStart + slotOffsetTime;
     packetToSend.timestamp = nextSlotStart;
-    transmitDataPacket(packetToSend);
+    transmitDataPacket(packetToSend, nextSlotStart);
   } else {
-    radioLink.setStartReceive(true);
+    radioLink.push();
+    radioLink.startRx(0xFFFF);
   }
 
   // --- Schedule next wakeup at the next slot boundary ---
