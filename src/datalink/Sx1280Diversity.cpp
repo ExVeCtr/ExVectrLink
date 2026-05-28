@@ -90,7 +90,7 @@ void Sx1280Diversity::addDiversityLink(
         //   }
         // }
         // if (linkMissingRecv) {
-        //   auto taskRun = Core::Now() + 1 * Core::MILLISECONDS;
+        //   auto taskRun = Core::NowNs() + 1 * Core::MILLISECONDS;
         //   setDeadline(taskRun);
         //   setRelease(taskRun);
         // } else {
@@ -134,7 +134,7 @@ bool Sx1280Diversity::transmitDataframe(
     return false;
   }
 
-  transmitting = dataframe.timestamp == 0 ? Core::Now() : dataframe.timestamp;
+  transmitting = dataframe.timestamp == 0 ? Core::NowNs() : dataframe.timestamp;
 
   auto txLinkIndex = getTxLinkIndex();
   auto &txLink = diversityLinks[txLinkIndex];
@@ -249,10 +249,10 @@ void Sx1280Diversity::determineBestLink() {
   // Require a new link to be at least kHysteresisDb better than the current
   // best to prevent rapid flapping when both radios have similar signal.
 
-  if (Core::Now() - lastbestLinkUpdateTime < 5 * Core::MILLISECONDS) {
+  if (Core::NowNs() - lastbestLinkUpdateTime < 5 * Core::MILLISECONDS) {
     return;
   }
-  lastbestLinkUpdateTime = Core::Now();
+  lastbestLinkUpdateTime = Core::NowNs();
   static constexpr int16_t kHysteresisDb = 0;
 
   int16_t currentSnr = diversityLinks[currentBestLinkIndex].lastPacketInfo.snr;

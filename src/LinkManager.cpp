@@ -27,8 +27,8 @@ uint8_t clampTxPower(uint8_t txPowerDBm) {
 uint32_t makeFhssSequenceKey(uint8_t mak) {
   uint32_t seed = 0xA5F01234u;
   seed ^= static_cast<uint32_t>(mak) << 24;
-  seed ^= static_cast<uint32_t>(Core::Now());
-  seed ^= static_cast<uint32_t>(Core::Now() >> 16);
+  seed ^= static_cast<uint32_t>(Core::NowNs());
+  seed ^= static_cast<uint32_t>(Core::NowNs() >> 16);
   return seed;
 }
 
@@ -67,7 +67,7 @@ void LinkManager::enableFhss(bool enable) {
 }
 
 void LinkManager::setPowerParams(uint8_t txPower, bool dynamicPower) {
-  link.setTxPower(txPower, dynamicPower);
+  // link.setTxPower(txPower, dynamicPower);
 }
 
 bool LinkManager::isFailsafe() const { return failsafe; }
@@ -110,7 +110,7 @@ size_t LinkManager::getMaxPacketSize() const { return link.getMaxPacketSize(); }
 bool LinkManager::isChannelBlocked() const { return link.isChannelBlocked(); }
 
 void LinkManager::receivePacket(const VCTR::network::DataPacket &packet) {
-  int64_t receiveTime = Core::Now();
+  int64_t receiveTime = Core::NowNs();
 
   auto packetType = packet.payload[packet.payload.size() - 1];
   if (packetType == VCTR::ExVectrLink::datalink::PacketTypes::Data) {
@@ -125,7 +125,7 @@ void LinkManager::receivePacket(const VCTR::network::DataPacket &packet) {
 
 void LinkManager::updateFailsafeState() {
   constexpr int64_t failsafeTimeout = 1000 * Core::MILLISECONDS;
-  // failsafe = (Core::Now() - lastPacketTime) > failsafeTimeout;
+  // failsafe = (Core::NowNs() - lastPacketTime) > failsafeTimeout;
   // if (failsafe) {
   //   currentTxPowerDBm = 0;
   //   for (size_t i = 0; i < numPowerLevels - 1 &&

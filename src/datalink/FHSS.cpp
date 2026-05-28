@@ -54,6 +54,9 @@ void FHSS::setRxSlotIndex(uint8_t index) {
 }
 uint8_t FHSS::getRxSlotIndex() const { return numTxPacketsToRx; }
 
+void FHSS::resetDesyncCounter() { desyncCounter = 0; }
+uint32_t FHSS::getDesyncCounter() const { return desyncCounter; }
+
 // =============================================================================
 // Status getters
 // =============================================================================
@@ -143,7 +146,7 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
   // The modulo wrapping makes the phase error independent of how many
   // slots have elapsed since then.
 
-  receiveStartTime -= 800 * Core::MICROSECONDS;
+  receiveStartTime -= 000 * Core::MICROSECONDS;
 
   int64_t referenceSlotStart = currentSlotStart;
   int64_t estimatedSlotStart = receiveStartTime - slotOffsetTime;
@@ -185,8 +188,8 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
 
       auto lqThres = 1.0f - 1.0f / (float)slotsPerHop;
       if (slotTimingOffset > slotInterval / 10) {
-        syncedStartTime = Core::Now();
-      } else if (Core::Now() - syncedStartTime > 500 * Core::MILLISECONDS &&
+        syncedStartTime = Core::NowNs();
+      } else if (Core::NowNs() - syncedStartTime > 500 * Core::MILLISECONDS &&
                  linkQuality > lqThres && linkQuality > 0.5f) {
         fhssState = FHSSState::Synced;
       }
@@ -215,7 +218,7 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
 void FHSS::hopChannel(bool reverse) {
   if (channelSequence.size() == 0)
     return;
-  lastChannelHopTime = Core::Now();
+  lastChannelHopTime = Core::NowNs();
   if (reverse) {
     if (currentChannelIdx == 0) {
       currentChannelIdx = channelSequence.size();
@@ -251,7 +254,7 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
     return;
   }
 
-  int64_t now = Core::Now();
+  int64_t now = Core::NowNs();
 
   size_t payloadEnd = packet.payload.size();
 
@@ -293,7 +296,6 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
     if (roleReverseCounter != txRoleReverseCounter) {
       falseCounterCount++;
       if (falseCounterCount > 10) {
-        // Too many mismatches, probably out of sync.  Reset to Syncing.
         fhssState = FHSSState::Syncing;
         roleReverseCounter = txRoleReverseCounter;
         slotCounter = txSlotCounter;
@@ -308,6 +310,15 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
     if (packet.payload.size() > 2) {
       auto dataPacket = packet;
       dataPacket.payload.popDiscard(2);
+
+      // Serial.printf("Received %d byte packet with payload: ",
+      //               dataPacket.payload.size());
+      // for (size_t i = 0; i < dataPacket.payload.size(); i++) {
+      //   Serial.print(dataPacket.payload[i], HEX);
+      //   Serial.print(" ");
+      // }
+      // Serial.println();
+
       receiveHandlers_.callHandlers(dataPacket);
     }
   }
@@ -334,29 +345,31 @@ void FHSS::taskInit() {
 
   radioLink.setEnableAutoRx(false);
 
-  currentSlotStart = Core::Now();
+  currentSlotStart = Core::NowNs();
 }
 
 void FHSS::taskCheck() {}
 
 void FHSS::taskThread() {
 
-  threadStart = Core::Now() - slotOffsetTime;
+  threadStart = Core::NowNs() - slotOffsetTime;
 
   timingControl();
 
   // --- Searching mode (RX side only) ---
   // In searching mode, slowly hop through channels trying to find a signal.
   if (isRxSide && fhssState == FHSSState::Synced &&
-      Core::Now() - lastPacketRcvTime > 3 * Core::SECONDS) {
+      Core::NowNs() - lastPacketRcvTime > 3 * Core::SECONDS) {
     fhssState = FHSSState::Searching;
+    desyncCounter++;
     intervalCorrection = 0;
     slotOffsetTime = 0;
     slotTimingOffset = 0;
     receiveSuccesses.clear();
   } else if (isRxSide && fhssState == FHSSState::Syncing &&
-             Core::Now() - lastPacketRcvTime > 0.5 * Core::SECONDS) {
+             Core::NowNs() - lastPacketRcvTime > 0.5 * Core::SECONDS) {
     fhssState = FHSSState::Searching;
+    desyncCounter++;
     intervalCorrection = 0;
     slotOffsetTime = 0;
     slotTimingOffset = 0;
@@ -368,7 +381,7 @@ void FHSS::taskThread() {
 
   // --- Sync Info for tx side ---
   if (!isRxSide) {
-    fhssState = (Core::Now() - lastPacketRcvTime > 1 * Core::SECONDS)
+    fhssState = (Core::NowNs() - lastPacketRcvTime > 1 * Core::SECONDS)
                     ? FHSSState::Searching
                     : FHSSState::Synced;
   }
@@ -399,7 +412,7 @@ void FHSS::updateLinkQuality() {
     // otherEndLinkQuality = 0;
   }
 
-  if (Core::Now() - lastPacketRcvTime > 1 * Core::SECONDS) {
+  if (Core::NowNs() - lastPacketRcvTime > 1 * Core::SECONDS) {
     otherEndLinkQuality = 0;
   }
 }

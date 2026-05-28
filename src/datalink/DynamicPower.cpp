@@ -71,14 +71,15 @@ void DynamicPower::setDecParameters(int8_t maxRssi, int8_t maxSnr,
   this->maxLq = maxLq;
 }
 
-void DynamicPower::incPower() {
+void DynamicPower::incPower(bool force) {
   for (size_t i = 0; i < kNumPowerLevels; i++) {
     const uint8_t level = kPowerLevels[i];
     if (level <= currentPowerDBm) {
       continue;
     }
 
-    if (level >= minPowerDBm && level <= maxPowerDBm) {
+    if (level >= minPowerDBm && level <= maxPowerDBm &&
+        (force || level <= maxDynPowerDBm)) {
       setPower(level);
     }
     return;
@@ -93,7 +94,7 @@ void DynamicPower::decPower() {
     }
 
     if (level >= minPowerDBm && level <= maxPowerDBm) {
-      lastDecTime = VCTR::Core::Now();
+      lastDecTime = VCTR::Core::NowNs();
       setPower(level);
     }
     return;
@@ -148,13 +149,12 @@ void DynamicPower::update(bool receivedPacket, int8_t rssi, int8_t snr,
                               (lq < minLq) || missedPacketInc ||
                               currentPowerDBm < minDynPowerDBm;
   const bool shouldDecrease =
-      (rssi > maxRssi) && (snr > maxSnr) && (lq > maxLq) && receivedPacket ||
-      currentPowerDBm > maxDynPowerDBm;
+      (rssi > maxRssi) && (snr > maxSnr) && (lq > maxLq) && receivedPacket;
 
   if (shouldIncrease && currentPowerDBm < maxDynPowerDBm) {
     incPower();
   } else if (shouldDecrease && currentPowerDBm > minDynPowerDBm &&
-             (VCTR::Core::Now() - lastDecTime) > 1 * VCTR::Core::SECONDS) {
+             (VCTR::Core::NowNs() - lastDecTime) > 1 * VCTR::Core::SECONDS) {
     decPower();
   }
 }

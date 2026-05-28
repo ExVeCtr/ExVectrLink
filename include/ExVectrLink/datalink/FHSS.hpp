@@ -83,6 +83,9 @@ public:
   void setRxSlotIndex(uint8_t index);
   uint8_t getRxSlotIndex() const;
 
+  void resetDesyncCounter();
+  uint32_t getDesyncCounter() const;
+
   // ===================== Status =====================
 
   FHSSState getFhssState() const;
@@ -116,7 +119,7 @@ public:
   void taskThread() override;
 
 private:
-  static constexpr uint8_t OTA_VERSION = 1;
+  static constexpr uint8_t OTA_VERSION = 2;
 
   /// @brief Number of trailer bytes appended to each outgoing frame.
   /// Layout: 1 bit data flag | 7 bits Quality | 4 bit slotCounter | 4 bit key
@@ -191,6 +194,7 @@ private:
   uint8_t lastReceivedPacketCrc = 0;
   int64_t lastReceivedPacketTime = 0;
 
+  uint32_t desyncCounter = 0;
   int64_t lastTxPrint = 0;
 
   // ---- Packet data ----

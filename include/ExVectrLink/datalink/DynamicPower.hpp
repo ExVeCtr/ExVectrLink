@@ -37,7 +37,9 @@ public:
    */
   void setDecParameters(int8_t maxRssi, int8_t maxSnr, uint8_t maxLq);
 
-  void incPower();
+  /// @brief Increments power by one step until the max is reached.
+  /// @param force If true, will ignore the dynamic power limit max.
+  void incPower(bool force = false);
   void decPower();
   void setPower(uint8_t powerDBm);
 
@@ -48,7 +50,7 @@ private:
   uint8_t minPowerDBm = 10;
   uint8_t maxDynPowerDBm = 33;
   uint8_t minDynPowerDBm = 10;
-  uint8_t currentPowerDBm = minPowerDBm;
+  uint8_t currentPowerDBm = minDynPowerDBm;
   uint8_t currentLq = 100;
   uint8_t missedPacketCount = 0;
   bool dynamicPowerEnabled = true;
@@ -56,11 +58,11 @@ private:
 
   int8_t minRssi = -100;
   int8_t minSnr = 1;
-  uint8_t minLq = 70;
+  uint8_t minLq = 85;
 
   int8_t maxRssi = -110;
-  int8_t maxSnr = 6;
-  uint8_t maxLq = 90;
+  int8_t maxSnr = 8;
+  uint8_t maxLq = 95;
 };
 
 } // namespace VCTR::ExVectrLink::datalink
