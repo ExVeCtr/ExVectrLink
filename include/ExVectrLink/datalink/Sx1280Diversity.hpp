@@ -32,6 +32,7 @@ public:
   getDiversityLink(size_t index) const;
 
   size_t getCurrentBestLinkIndex() const;
+  size_t getCurrentTxLinkIndex() const;
 
   /**
    * @brief Use only the given link for tx. Rx will uise any.

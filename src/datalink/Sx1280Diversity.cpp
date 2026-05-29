@@ -39,6 +39,10 @@ size_t Sx1280Diversity::getCurrentBestLinkIndex() const {
   return currentBestLinkIndex;
 }
 
+size_t Sx1280Diversity::getCurrentTxLinkIndex() const {
+  return getTxLinkIndex();
+}
+
 bool Sx1280Diversity::setDesignatedTxLink(
     const VCTR::network::datalink::Sx1280_DirectI &link) {
 
