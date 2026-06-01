@@ -298,17 +298,19 @@ public:
 
 class SerialPacket_LinkInfo {
 public:
-  /// Per-side link statistics (14 bytes serialised).
+  /// Per-side link statistics (13 bytes serialised).
   struct SideStats {
-    int8_t rssi = 0;           ///< dBm (negative)
-    int8_t snr = 0;            ///< dB
-    int8_t txPower = 0;        ///< dBm
-    bool dynamicPower = false; ///< if dyn power enabled
-    uint8_t antenna = 0;       ///< Active antenna index
-    uint8_t linkQuality = 0;   ///< 0-100 %
-    uint8_t lossRate = 0;      ///< 0-100 % (100 = all lost)
-    int32_t deviceTime = 0;    ///< Remote device time in s
-    uint16_t desyncCount = 0;  ///< FHSS desync count
+    int8_t rssi = 0;             ///< dBm (negative)
+    int8_t snr = 0;              ///< dB
+    int8_t txPower = 0;          ///< dBm
+    bool dynamicPower = false;   ///< if dyn power enabled
+    uint8_t antenna = 0;         ///< Active antenna index
+    uint8_t linkQuality = 0;     ///< 0-100 % receive slots carrying payload
+    uint8_t lossRate = 0;        ///< 0-100 % (100 = all lost)
+    uint8_t packetQuality = 0;   ///< 0-100 % simply packets received / arrived
+    uint16_t desyncCount = 0;    ///< FHSS desync count
+    uint16_t packetRate = 0;     ///< Accepted RC packets per second
+    uint16_t crsfTxFailures = 0; ///< CRSF frames that failed to queue per s
   };
 
   SideStats local;  ///< Stats as seen / reported by this node.
@@ -316,8 +318,8 @@ public:
   bool remoteValid = false; ///< True once at least one OTA packet received.
 
   SerialPacketType getPacketType() const { return SerialPacketType::LinkInfo; }
-  // 6 bytes × 2 sides + 1 valid flag + 4 bytes remoteDeviceTime = 17 bytes
-  uint8_t numBytes() const { return 25; }
+  // 13 bytes × 2 sides + 1 valid flag = 27 bytes.
+  uint8_t numBytes() const { return 27; }
 
   void serialize(uint8_t *buffer) const {
     buffer[0] = (uint8_t)local.rssi;
@@ -326,25 +328,27 @@ public:
     buffer[3] = local.antenna;
     buffer[4] = local.linkQuality;
     buffer[5] = local.lossRate;
-    buffer[6] = local.deviceTime & 0xFF;
-    buffer[7] = (local.deviceTime >> 8) & 0xFF;
-    buffer[8] = (local.deviceTime >> 16) & 0xFF;
-    buffer[9] = (local.deviceTime >> 24) & 0xFF;
-    buffer[10] = local.desyncCount & 0xFF;
-    buffer[11] = (local.desyncCount >> 8) & 0xFF;
-    buffer[12] = (uint8_t)remote.rssi;
-    buffer[13] = (uint8_t)remote.snr;
-    buffer[14] = (remote.dynamicPower ? 0x80 : 0x00) | (remote.txPower & 0x7F);
-    buffer[15] = remote.antenna;
-    buffer[16] = remote.linkQuality;
-    buffer[17] = remote.lossRate;
-    buffer[18] = (uint8_t)(remote.deviceTime & 0xFF);
-    buffer[19] = (uint8_t)((remote.deviceTime >> 8) & 0xFF);
-    buffer[20] = (uint8_t)((remote.deviceTime >> 16) & 0xFF);
-    buffer[21] = (uint8_t)((remote.deviceTime >> 24) & 0xFF);
-    buffer[22] = (uint8_t)(remote.desyncCount & 0xFF);
-    buffer[23] = (uint8_t)((remote.desyncCount >> 8) & 0xFF);
-    buffer[24] = remoteValid ? 1 : 0;
+    buffer[6] = local.packetQuality;
+    buffer[7] = local.desyncCount & 0xFF;
+    buffer[8] = (local.desyncCount >> 8) & 0xFF;
+    buffer[9] = local.packetRate & 0xFF;
+    buffer[10] = (local.packetRate >> 8) & 0xFF;
+    buffer[11] = local.crsfTxFailures & 0xFF;
+    buffer[12] = (local.crsfTxFailures >> 8) & 0xFF;
+    buffer[13] = (uint8_t)remote.rssi;
+    buffer[14] = (uint8_t)remote.snr;
+    buffer[15] = (remote.dynamicPower ? 0x80 : 0x00) | (remote.txPower & 0x7F);
+    buffer[16] = remote.antenna;
+    buffer[17] = remote.linkQuality;
+    buffer[18] = remote.lossRate;
+    buffer[19] = remote.packetQuality;
+    buffer[20] = (uint8_t)(remote.desyncCount & 0xFF);
+    buffer[21] = (uint8_t)((remote.desyncCount >> 8) & 0xFF);
+    buffer[22] = (uint8_t)(remote.packetRate & 0xFF);
+    buffer[23] = (uint8_t)((remote.packetRate >> 8) & 0xFF);
+    buffer[24] = (uint8_t)(remote.crsfTxFailures & 0xFF);
+    buffer[25] = (uint8_t)((remote.crsfTxFailures >> 8) & 0xFF);
+    buffer[26] = remoteValid ? 1 : 0;
   }
   bool deserialize(const uint8_t *buffer) {
     local.rssi = (int8_t)buffer[0];
@@ -354,24 +358,22 @@ public:
     local.antenna = buffer[3];
     local.linkQuality = buffer[4];
     local.lossRate = buffer[5];
-    local.deviceTime = static_cast<int32_t>(buffer[6]) |
-                       (static_cast<int32_t>(buffer[7]) << 8) |
-                       (static_cast<int32_t>(buffer[8]) << 16) |
-                       (static_cast<int32_t>(buffer[9]) << 24);
-    local.desyncCount = (uint16_t)buffer[10] | ((uint16_t)buffer[11] << 8);
-    remote.rssi = (int8_t)buffer[12];
-    remote.snr = (int8_t)buffer[13];
-    remote.txPower = (int8_t)(buffer[14] & 0x7F);
-    remote.dynamicPower = (buffer[14] & 0x80) != 0;
-    remote.antenna = buffer[15];
-    remote.linkQuality = buffer[16];
-    remote.lossRate = buffer[17];
-    remote.deviceTime = static_cast<int32_t>(buffer[18]) |
-                        (static_cast<int32_t>(buffer[19]) << 8) |
-                        (static_cast<int32_t>(buffer[20]) << 16) |
-                        (static_cast<int32_t>(buffer[21]) << 24);
-    remote.desyncCount = (uint16_t)buffer[22] | ((uint16_t)buffer[23] << 8);
-    remoteValid = buffer[24] == 1;
+    local.packetQuality = buffer[6];
+    local.desyncCount = (uint16_t)buffer[7] | ((uint16_t)buffer[8] << 8);
+    local.packetRate = (uint16_t)buffer[9] | ((uint16_t)buffer[10] << 8);
+    local.crsfTxFailures = (uint16_t)buffer[11] | ((uint16_t)buffer[12] << 8);
+    remote.rssi = (int8_t)buffer[13];
+    remote.snr = (int8_t)buffer[14];
+    remote.txPower = (int8_t)(buffer[15] & 0x7F);
+    remote.dynamicPower = (buffer[15] & 0x80) != 0;
+    remote.antenna = buffer[16];
+    remote.linkQuality = buffer[17];
+    remote.lossRate = buffer[18];
+    remote.packetQuality = buffer[19];
+    remote.desyncCount = (uint16_t)buffer[20] | ((uint16_t)buffer[21] << 8);
+    remote.packetRate = (uint16_t)buffer[22] | ((uint16_t)buffer[23] << 8);
+    remote.crsfTxFailures = (uint16_t)buffer[24] | ((uint16_t)buffer[25] << 8);
+    remoteValid = buffer[26] == 1;
     return true;
   }
 };

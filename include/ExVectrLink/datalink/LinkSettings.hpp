@@ -28,10 +28,13 @@ struct LinkInfo {
   // --- Local side (as seen by this node) ---
   int8_t rssi = 0;
   int8_t snr = 0;
-  uint8_t antenna = 0;     // Current antenna in use.
-  uint8_t lossRate = 0;    // percentage of last 100 packets that were lost.
-  uint8_t linkQuality = 0; // percentage of last 100 packets received.
-  int8_t txPower = 0;      // TX power in dBm.
+  uint8_t antenna = 0;         // Current antenna in use.
+  uint8_t lossRate = 0;        // percentage of last 100 packets that were lost.
+  uint8_t linkQuality = 0;     // percentage of RX slots carrying payload.
+  uint8_t packetQuality = 0;   // percentage of last 100 packets received.
+  uint16_t packetRate = 0;     // accepted RC packets per second.
+  uint16_t crsfTxFailures = 0; // CRSF frames that failed to queue per second.
+  int8_t txPower = 0;          // TX power in dBm.
 
   // --- Remote side (received via OTA LinkTelemetry) ---
   int8_t remoteRssi = 0;
@@ -39,6 +42,9 @@ struct LinkInfo {
   uint8_t remoteAntenna = 0;
   uint8_t remoteLossRate = 0;
   uint8_t remoteLinkQuality = 0;
+  uint8_t remotePacketQuality = 0;
+  uint16_t remotePacketRate = 0;
+  uint16_t remoteCrsfTxFailures = 0;
   int8_t remoteTxPower = 0;
   bool remoteValid = false;
 

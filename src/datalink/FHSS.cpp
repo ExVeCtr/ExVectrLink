@@ -67,6 +67,8 @@ float FHSS::getLinkQuality() const {
   return (float)(isRxSide ? linkQuality : otherEndLinkQuality);
 }
 
+float FHSS::getPacketQuality() const { return packetQuality; }
+
 int64_t FHSS::getTimingOffset() const { return slotTimingOffset; }
 
 int64_t FHSS::getTrueSlotInterval() const { return trueSlotInterval; }
@@ -184,13 +186,13 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
 
     } else if (fhssState == FHSSState::Syncing) {
       slotTimingOffset = slotStartError;
-      slotOffsetTime += slotStartError * 0.1;
+      slotOffsetTime += slotStartError * 0.2;
 
       auto lqThres = 1.0f - 1.0f / (float)slotsPerHop;
       if (slotTimingOffset > slotInterval / 10) {
         syncedStartTime = Core::NowNs();
       } else if (Core::NowNs() - syncedStartTime > 500 * Core::MILLISECONDS &&
-                 linkQuality > lqThres && linkQuality > 0.5f) {
+                 packetQuality > lqThres && packetQuality > 0.5f) {
         fhssState = FHSSState::Synced;
       }
 
@@ -260,7 +262,7 @@ void FHSS::transmitDataPacket(network::DataPacket &packetData,
 }
 
 void FHSS::receivePacket(const network::DataPacket &packet) {
-  if (packet.payload.size() < 3) {
+  if (packet.payload.size() < 2) {
     return;
   }
 
@@ -318,6 +320,7 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
     receivedPacket = true;
     falseCounterCount = 0;
     if (packet.payload.size() > 2) {
+      receivedPacketData = true;
       auto dataPacket = packet;
       dataPacket.payload.popDiscard(2);
 
@@ -412,20 +415,27 @@ void FHSS::updateLinkQuality() {
 
   if (receiveSuccesses.size() < 2) {
     linkQuality = 0;
+    packetQuality = 0;
     otherEndLinkQuality = 0;
     return;
   }
 
   size_t successCount = 0;
+  size_t dataSuccessCount = 0;
   for (size_t i = 0; i < receiveSuccesses.size(); i++) {
-    if (receiveSuccesses[i]) {
+    if (receiveSuccesses[i].receivedPacket) {
       successCount++;
+    }
+    if (receiveSuccesses[i].receivedPacketData) {
+      dataSuccessCount++;
     }
   }
 
-  linkQuality = (float)successCount / (float)receiveSuccesses.size();
+  linkQuality = (float)dataSuccessCount / (float)receiveSuccesses.size();
+  packetQuality = (float)successCount / (float)receiveSuccesses.size();
 
-  if (!receiveSuccesses(-1) && !receiveSuccesses(-2)) {
+  if (!receiveSuccesses(-1).receivedPacket &&
+      !receiveSuccesses(-2).receivedPacket) {
     // linkQuality = 0;
     // otherEndLinkQuality = 0;
   }
@@ -487,7 +497,8 @@ void FHSS::timingControl() {
 
   // --- Record link quality for the previous slot ---
   if (lastSlotWasReceive) {
-    receiveSuccesses.placeBack(receivedPacket, true);
+    receiveSuccesses.placeBack(
+        ReceiveWindowSample{receivedPacket, receivedPacketData}, true);
   }
 
   // --- Advance counters for this new slot ---
@@ -502,6 +513,7 @@ void FHSS::timingControl() {
 
   lastSlotWasReceive = !thisSlotIsTx;
   receivedPacket = false;
+  receivedPacketData = false;
 
   // --- Channel hop (must happen BEFORE any radio operation) ---
   if (isRxSide && fhssState == FHSSState::Searching) {
