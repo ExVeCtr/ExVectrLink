@@ -1,6 +1,7 @@
 #ifndef EXVECTRLINK_SX1280DIVERSITY_HPP
 #define EXVECTRLINK_SX1280DIVERSITY_HPP
 
+#include "ExVectrCore/list_buffer.hpp"
 #include "ExVectrNetwork/DataPacket.hpp"
 #include "ExVectrNetwork/datalink/sx1280/Sx1280_Direct.hpp"
 
@@ -20,6 +21,7 @@ private:
 
   static constexpr size_t kMaxDiversityLinks = 2;
   static constexpr size_t kNoLink = static_cast<size_t>(-1);
+  static constexpr size_t kSnrMedianWindow = 10;
 
 public:
   Sx1280Diversity() = default;
@@ -65,6 +67,9 @@ public:
   void setPacketMode(VCTR::network::datalink::SX1280_PacketMode mode) override;
   void setFixedPacketLength(uint8_t length) override;
   void setPAdbm(uint8_t paDbm) override;
+  void setAutoFS(bool enable) override;
+
+  void setIdle() override;
 
   void push(bool keepOscRunning = false) override;
   void pull() override;
@@ -79,12 +84,18 @@ private:
   size_t designatedTxLink = kNoLink;
   size_t currentBestLinkIndex = 0;
   size_t pendingTxLinkIndex = 0;
+  size_t activeTxLinkIndex = kNoLink;
 
   int16_t lastDeliveredPacketRssi = 0;
   int16_t lastDeliveredPacketSnr = 0;
+  VCTR::Core::ListBuffer<int16_t, kSnrMedianWindow> snrHistory;
+  bool currentCycleHasPacket = false;
+  int16_t currentCycleRssi = 0;
+  int16_t currentCycleSnr = std::numeric_limits<int16_t>::min();
   VCTR::network::DataPacket lastRxPacket;
   uint32_t rxPacketCount = 0;
   bool rxPacketLatched = false;
+  bool txInProgress = false;
 };
 
 } // namespace VCTR::ExVectrLink::datalink

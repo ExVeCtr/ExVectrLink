@@ -83,13 +83,42 @@ bool Sx1280Diversity::configureRadio() {
 
   refreshBestLink();
   pendingTxLinkIndex = getTxLinkIndex();
+  activeTxLinkIndex = kNoLink;
   rxPacketLatched = false;
+  txInProgress = false;
+  snrHistory.clear();
 
   return configured;
 }
 
 void Sx1280Diversity::startRx(int64_t timeout) {
   rxPacketLatched = false;
+  txInProgress = false;
+  activeTxLinkIndex = kNoLink;
+
+  // Keep a buffer value so RSSI and SNR aren't invalid when waiting for the
+  // packet. Set the reported values to the best radio's last packet values.
+  if (diversityLinkCount > 0) {
+    size_t bestIdx = 0;
+    int16_t bestSnr = std::numeric_limits<int16_t>::min();
+    for (size_t i = 0; i < diversityLinkCount; ++i) {
+      if (diversityLinks[i].lastPacketSnr > bestSnr) {
+        bestSnr = diversityLinks[i].lastPacketSnr;
+        bestIdx = i;
+      }
+    }
+    lastDeliveredPacketRssi = diversityLinks[bestIdx].lastPacketRssi;
+    if (snrHistory.size() > 0) {
+      lastDeliveredPacketSnr = snrHistory.getMedian();
+    } else {
+      lastDeliveredPacketSnr = diversityLinks[bestIdx].lastPacketSnr;
+    }
+  }
+
+  // Reset internal cycle buffer
+  currentCycleHasPacket = false;
+  currentCycleRssi = 0;
+  currentCycleSnr = std::numeric_limits<int16_t>::min();
 
   for (size_t i = 0; i < diversityLinkCount; i++) {
     auto &linkInfo = diversityLinks[i];
@@ -122,6 +151,19 @@ bool Sx1280Diversity::setupTxPacket(const VCTR::network::DataPacket &packet) {
 void Sx1280Diversity::startTx() {
   if (diversityLinkCount == 0) {
     return;
+  }
+
+  activeTxLinkIndex = pendingTxLinkIndex;
+  txInProgress = true;
+
+  for (size_t i = 0; i < diversityLinkCount; i++) {
+    if (i == activeTxLinkIndex) {
+      continue;
+    }
+
+    auto &linkInfo = diversityLinks[i];
+    linkInfo.link->push(true);
+    linkInfo.lastSeenRxPacketCount = linkInfo.link->getRxPacketCount();
   }
 
   diversityLinks[pendingTxLinkIndex].link->startTx();
@@ -211,6 +253,18 @@ void Sx1280Diversity::setPAdbm(uint8_t paDbm) {
   }
 }
 
+void Sx1280Diversity::setAutoFS(bool enable) {
+  for (size_t i = 0; i < diversityLinkCount; i++) {
+    diversityLinks[i].link->setAutoFS(enable);
+  }
+}
+
+void Sx1280Diversity::setIdle() {
+  for (size_t i = 0; i < diversityLinkCount; i++) {
+    diversityLinks[i].link->setIdle();
+  }
+}
+
 void Sx1280Diversity::push(bool keepOscRunning) {
   for (size_t i = 0; i < diversityLinkCount; i++) {
     diversityLinks[i].link->push(keepOscRunning);
@@ -222,9 +276,16 @@ void Sx1280Diversity::pull() {
     return;
   }
 
-  size_t candidateIndexes[kMaxDiversityLinks] = {};
-  VCTR::network::DataPacket candidatePackets[kMaxDiversityLinks];
-  size_t candidateCount = 0;
+  if (txInProgress) {
+    if (activeTxLinkIndex < diversityLinkCount) {
+      diversityLinks[activeTxLinkIndex].link->pull();
+    }
+    return;
+  }
+
+  size_t winningLinkIndex = kNoLink;
+  VCTR::network::DataPacket winningPacket;
+  int16_t winningSnr = std::numeric_limits<int16_t>::min();
 
   for (size_t i = 0; i < diversityLinkCount; i++) {
     auto &linkInfo = diversityLinks[i];
@@ -239,31 +300,41 @@ void Sx1280Diversity::pull() {
     linkInfo.lastPacketRssi = linkInfo.link->getPacketRSSI();
     linkInfo.lastPacketSnr = linkInfo.link->getPacketSNR();
 
-    if (candidateCount < kMaxDiversityLinks) {
-      candidateIndexes[candidateCount] = i;
-      candidatePackets[candidateCount] = linkInfo.link->getRxPacket();
-      candidateCount++;
+    if (!currentCycleHasPacket) {
+      currentCycleHasPacket = true;
+      currentCycleRssi = linkInfo.lastPacketRssi;
+      currentCycleSnr = linkInfo.lastPacketSnr;
+      lastDeliveredPacketRssi = currentCycleRssi;
+      lastDeliveredPacketSnr = currentCycleSnr;
+    } else {
+      if (linkInfo.lastPacketSnr > currentCycleSnr) {
+        currentCycleRssi = linkInfo.lastPacketRssi;
+        currentCycleSnr = linkInfo.lastPacketSnr;
+        lastDeliveredPacketRssi = currentCycleRssi;
+        lastDeliveredPacketSnr = currentCycleSnr;
+      }
+    }
+
+    const auto candidatePacket = linkInfo.link->getRxPacket();
+    if (winningLinkIndex == kNoLink || linkInfo.lastPacketSnr > winningSnr ||
+        (linkInfo.lastPacketSnr == winningSnr &&
+         candidatePacket.timestamp < winningPacket.timestamp)) {
+      winningLinkIndex = i;
+      winningPacket = candidatePacket;
+      winningSnr = linkInfo.lastPacketSnr;
     }
   }
 
   refreshBestLink();
 
-  if (rxPacketLatched || candidateCount == 0) {
+  if (rxPacketLatched || winningLinkIndex == kNoLink) {
     return;
   }
 
-  size_t selectedCandidate = 0;
-  for (size_t i = 1; i < candidateCount; i++) {
-    if (candidatePackets[i].timestamp <
-        candidatePackets[selectedCandidate].timestamp) {
-      selectedCandidate = i;
-    }
-  }
-
-  const size_t selectedLinkIndex = candidateIndexes[selectedCandidate];
-  lastRxPacket = candidatePackets[selectedCandidate];
-  lastDeliveredPacketRssi = diversityLinks[selectedLinkIndex].lastPacketRssi;
-  lastDeliveredPacketSnr = diversityLinks[selectedLinkIndex].lastPacketSnr;
+  lastRxPacket = winningPacket;
+  lastDeliveredPacketRssi = diversityLinks[winningLinkIndex].lastPacketRssi;
+  snrHistory.placeBack(diversityLinks[winningLinkIndex].lastPacketSnr, true);
+  lastDeliveredPacketSnr = snrHistory.getMedian();
   rxPacketLatched = true;
   rxPacketCount++;
 }

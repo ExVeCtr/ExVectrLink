@@ -148,7 +148,7 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
   // The modulo wrapping makes the phase error independent of how many
   // slots have elapsed since then.
 
-  receiveStartTime -= 300 * Core::MICROSECONDS;
+  receiveStartTime -= 1000 * Core::MICROSECONDS;
 
   int64_t referenceSlotStart = currentSlotStart;
   int64_t estimatedSlotStart = receiveStartTime - slotOffsetTime;
@@ -235,21 +235,23 @@ void FHSS::hopChannel(bool reverse) {
 void FHSS::transmitDataPacket(network::DataPacket &packetData,
                               int64_t txTargetTime) {
 
+  auto packetCopy = packetData;
+
   auto slotCounterBuf = slotCounter % slotsPerHop;
   auto roleReverseBuf = (roleReverseCounter) % numTxPacketsToRx;
   uint8_t byte1 = ((uint8_t)((roleReverseBuf) & 0x3F) << 2) |
                   (uint8_t)(slotCounterBuf & 0x03);
 
-  packetData.payload.append(byte1);
+  packetCopy.payload.append(byte1);
 
   auto crc = key + OTA_VERSION + (isRxSide ? 0x40 : 0x00);
-  for (size_t i = 0; i < packetData.payload.size(); i++) {
-    crc ^= packetData.payload[i];
+  for (size_t i = 0; i < packetCopy.payload.size(); i++) {
+    crc ^= packetCopy.payload[i];
   }
 
-  packetData.payload.append((uint8_t)crc);
+  packetCopy.payload.append((uint8_t)crc);
 
-  if (radioLink.setupTxPacket(packetData)) {
+  if (radioLink.setupTxPacket(packetCopy)) {
     // Load the TX FIFO early (SPI-heavy) so only startTx() remains at the
     // slot boundary.
     radioLink.push();
@@ -351,6 +353,7 @@ void FHSS::taskInit() {
     radioLink.setChannel(channelSequence[0]);
   }
 
+  radioLink.setAutoFS(true);
   radioLink.configureRadio();
   lastSeenRxPacketCount = radioLink.getRxPacketCount();
 
@@ -478,6 +481,18 @@ void FHSS::timingControl() {
     int64_t missed = (threadStart - currentSlotStart) / interval;
     currentSlotStart += missed * interval;
 
+    // Record missed rx slots as false in link quality buffer
+    int64_t missedToRecord = missed > 100 ? 100 : missed;
+    for (int64_t i = missed - missedToRecord + 1; i <= missed; i++) {
+      uint8_t missedRoleReverseCounter =
+          (roleReverseCounter + i) % numTxPacketsToRx;
+      bool missedSlotIsTx = isRxSide ? (missedRoleReverseCounter == 0)
+                                     : (missedRoleReverseCounter != 0);
+      if (!missedSlotIsTx) {
+        receiveSuccesses.placeBack(ReceiveWindowSample{false, false}, true);
+      }
+    }
+
     // Compute channel hops for the skipped slots.
     if (channelSequence.size() > 0 && slotsPerHop > 0) {
       size_t totalAdvance = (size_t)missed + 1;
@@ -515,25 +530,30 @@ void FHSS::timingControl() {
   receivedPacket = false;
   receivedPacketData = false;
 
+  bool hoppedChannel = false;
   // --- Channel hop (must happen BEFORE any radio operation) ---
   if (isRxSide && fhssState == FHSSState::Searching) {
-    if (threadStart - lastSearchHopTime >= slotInterval * 2.2) {
+    if (threadStart - lastSearchHopTime >= slotInterval * 2.1) {
       lastSearchHopTime = threadStart;
       hopChannel(true);
+      hoppedChannel = true;
     }
   } else if (slotCounter == 0) {
     hopChannel();
+    hoppedChannel = true;
   }
 
   // --- TX or RX ---
   allowedToTx = !isRxSide || fhssState == FHSSState::Synced;
-  blocked = false; // Sx1280_Direct is always ready; we control timing directly.
 
-  if (thisSlotIsTx && allowedToTx && !blocked) {
+  if (thisSlotIsTx && allowedToTx) {
     int64_t nextSlotStart = currentSlotStart + slotOffsetTime;
     packetToSend.timestamp = nextSlotStart;
     transmitDataPacket(packetToSend, nextSlotStart);
   } else {
+    // if (hoppedChannel) {
+    //   radioLink.push();
+    // }
     radioLink.push();
     radioLink.startRx(0xFFFF);
   }
@@ -543,8 +563,17 @@ void FHSS::timingControl() {
   // act right when the slot starts.
   int64_t nextSlotStart =
       currentSlotStart + getAdjustedSlotInterval() + slotOffsetTime;
-  setDeadline(nextSlotStart - 2 * Core::MILLISECONDS);
-  setRelease(nextSlotStart - 2 * Core::MILLISECONDS);
+  int64_t wakeupLeadTime = 1 * Core::MILLISECONDS;
+
+  uint8_t nextRoleReverseCounter = (roleReverseCounter + 1) % numTxPacketsToRx;
+  bool nextSlotIsTx =
+      isRxSide ? (nextRoleReverseCounter == 0) : (nextRoleReverseCounter != 0);
+  if (!nextSlotIsTx) {
+    wakeupLeadTime += 0.3 * Core::MILLISECONDS; // Start RX slots 1ms early
+  }
+
+  setDeadline(nextSlotStart - wakeupLeadTime);
+  setRelease(nextSlotStart - wakeupLeadTime);
 
   schedulingPhase = true;
 }

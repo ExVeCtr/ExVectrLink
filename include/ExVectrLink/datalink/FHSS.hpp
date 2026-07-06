@@ -153,13 +153,13 @@ private:
 
   // ======================= Configuration =======================
 
-  int64_t slotInterval = 15 * Core::MILLISECONDS;
+  int64_t slotInterval = 10 * Core::MILLISECONDS;
   int64_t trueSlotInterval = slotInterval;
   size_t slotsPerHop = 4;
 
   bool isRxSide = false;
   // After this amount of tx Packets, send an rx Packet. Max 16
-  uint8_t numTxPacketsToRx = 11;
+  uint8_t numTxPacketsToRx = 15;
 
   // ===================== State =====================
 
