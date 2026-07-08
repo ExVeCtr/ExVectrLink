@@ -144,15 +144,9 @@ void FHSS::generateChannelSequence(uint8_t key) {
 
 void FHSS::syncTimer(int64_t receiveStartTime) {
 
-  // Phase error relative to the current slot grid.
-  // The packet timestamp (receiveStartTime) marks the start of reception
-  // which approximates the TX-side slot boundary.  Since the receivePacket
-  // callback fires later (after the full packet is received), currentSlotStart
-  // may already have been advanced past the slot the packet belongs to.
-  // The modulo wrapping makes the phase error independent of how many
-  // slots have elapsed since then.
-
-  receiveStartTime -= 1400 * Core::MICROSECONDS;
+  // Error offset
+  constexpr int64_t kSyncLatencyCompensation = 500 * Core::MICROSECONDS;
+  receiveStartTime -= kSyncLatencyCompensation;
 
   int64_t referenceSlotStart = currentSlotStart;
   int64_t estimatedSlotStart = receiveStartTime - slotOffsetTime;
@@ -201,14 +195,14 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
       }
 
     } else {
-      slotTimingOffset = slotTimingOffset * 0.99 + slotStartError * 0.01;
-      slotOffsetTime += slotStartError * 0.005;
+      slotTimingOffset = slotTimingOffset * 0.98 + slotStartError * 0.02;
+      slotOffsetTime += slotStartError * 0.01;
 
       // Slowly integrate the filtered phase error to correct for clock
       // frequency offset.  Uses slotOffsetTime (slow average) so noise
       // doesn't feed directly into the integrator.  Leaky decay prevents
       // windup if conditions change.
-      constexpr float kIntervalGain = 0.000003f;
+      constexpr float kIntervalGain = 0.00001f;
       constexpr float kIntervalMaxPct = 0.01f; // ±1 % of slot interval
       intervalCorrection += (float)slotStartError * kIntervalGain;
       float maxCorr = (float)slotInterval * kIntervalMaxPct;
@@ -472,7 +466,7 @@ void FHSS::timingControl() {
   // --- Update interval correction for clock drift ---
   trueSlotInterval =
       slotInterval + (int64_t)intervalCorrection +
-      (receivedPacket ? slotTimingOffset * 0.00003 : 0) +
+      (receivedPacket ? slotTimingOffset * 0.0001 : 0) +
       (fhssState == FHSSState::Searching && isRxSide ? slotInterval * 0.1 : 0);
 
   // --- Advance slot timing ---
