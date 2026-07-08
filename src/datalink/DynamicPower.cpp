@@ -41,16 +41,46 @@ void DynamicPower::setMinPower(uint8_t minPowerDBm) {
   setPower(currentPowerDBm);
 }
 
+void DynamicPower::constrainPowerToLimits() {
+  if (!dynamicPowerEnabled) {
+    // Disabled: run fixed at the configured dynamic-max.
+    setPower(maxDynPowerDBm);
+    return;
+  }
+  // Enabled: snap the current level back inside the dynamic [min, max] range
+  // straight away, so changing a limit to sit outside the current power takes
+  // effect immediately instead of only on the next algorithm step.
+  if (currentPowerDBm < minDynPowerDBm) {
+    setPower(minDynPowerDBm);
+  } else if (currentPowerDBm > maxDynPowerDBm) {
+    setPower(maxDynPowerDBm);
+  }
+}
+
 void DynamicPower::setDynMaxPower(uint8_t maxPowerDBm) {
   this->maxDynPowerDBm = maxPowerDBm;
+  constrainPowerToLimits();
 }
 
 void DynamicPower::setDynMinPower(uint8_t minPowerDBm) {
   this->minDynPowerDBm = minPowerDBm;
+  constrainPowerToLimits();
 }
+
+uint8_t DynamicPower::getMaxPower() const { return maxPowerDBm; }
+
+uint8_t DynamicPower::getMinPower() const { return minPowerDBm; }
+
+uint8_t DynamicPower::getDynMaxPower() const { return maxDynPowerDBm; }
+
+uint8_t DynamicPower::getDynMinPower() const { return minDynPowerDBm; }
 
 void DynamicPower::setEnableDynamicPower(bool enable) {
   dynamicPowerEnabled = enable;
+  // When the automatic algorithm is turned off this jumps straight to the max
+  // (the configured dynamic-max ceiling) and holds there; when turned on it
+  // snaps the current level inside the dynamic [min, max] range.
+  constrainPowerToLimits();
 }
 
 bool DynamicPower::isDynamicPowerEnabled() const { return dynamicPowerEnabled; }

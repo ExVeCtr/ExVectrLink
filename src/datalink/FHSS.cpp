@@ -57,19 +57,23 @@ uint8_t FHSS::getRxSlotIndex() const { return numTxPacketsToRx; }
 void FHSS::resetDesyncCounter() { desyncCounter = 0; }
 uint32_t FHSS::getDesyncCounter() const { return desyncCounter; }
 
+uint32_t FHSS::getMissedSlotCounter() const { return missedSlotCounter; }
+
 // =============================================================================
 // Status getters
 // =============================================================================
 
 FHSSState FHSS::getFhssState() const { return fhssState; }
 
-float FHSS::getLinkQuality() const {
-  return (float)(isRxSide ? linkQuality : otherEndLinkQuality);
-}
+float FHSS::getLinkQuality() const { return linkQuality; }
 
 float FHSS::getPacketQuality() const { return packetQuality; }
 
 int64_t FHSS::getTimingOffset() const { return slotTimingOffset; }
+
+int64_t FHSS::getIntervalCorrection() const {
+  return (int64_t)intervalCorrection;
+}
 
 int64_t FHSS::getTrueSlotInterval() const { return trueSlotInterval; }
 
@@ -148,7 +152,7 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
   // The modulo wrapping makes the phase error independent of how many
   // slots have elapsed since then.
 
-  receiveStartTime -= 1000 * Core::MICROSECONDS;
+  receiveStartTime -= 1600 * Core::MICROSECONDS;
 
   int64_t referenceSlotStart = currentSlotStart;
   int64_t estimatedSlotStart = receiveStartTime - slotOffsetTime;
@@ -197,14 +201,14 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
       }
 
     } else {
-      slotTimingOffset = slotTimingOffset * 0.95 + slotStartError * 0.05;
-      slotOffsetTime += slotStartError * 0.05;
+      slotTimingOffset = slotTimingOffset * 0.99 + slotStartError * 0.01;
+      slotOffsetTime += slotStartError * 0.005;
 
       // Slowly integrate the filtered phase error to correct for clock
       // frequency offset.  Uses slotOffsetTime (slow average) so noise
       // doesn't feed directly into the integrator.  Leaky decay prevents
       // windup if conditions change.
-      constexpr float kIntervalGain = 0.00002f;
+      constexpr float kIntervalGain = 0.000003f;
       constexpr float kIntervalMaxPct = 0.01f; // ±1 % of slot interval
       intervalCorrection += (float)slotStartError * kIntervalGain;
       float maxCorr = (float)slotInterval * kIntervalMaxPct;
@@ -254,7 +258,7 @@ void FHSS::transmitDataPacket(network::DataPacket &packetData,
   if (radioLink.setupTxPacket(packetCopy)) {
     // Load the TX FIFO early (SPI-heavy) so only startTx() remains at the
     // slot boundary.
-    radioLink.push();
+    radioLink.push(true);
     // Busy-wait until the exact slot start time for precise TX alignment.
     while (Core::NowNs() < txTargetTime) {
     }
@@ -419,7 +423,6 @@ void FHSS::updateLinkQuality() {
   if (receiveSuccesses.size() < 2) {
     linkQuality = 0;
     packetQuality = 0;
-    otherEndLinkQuality = 0;
     return;
   }
 
@@ -440,11 +443,6 @@ void FHSS::updateLinkQuality() {
   if (!receiveSuccesses(-1).receivedPacket &&
       !receiveSuccesses(-2).receivedPacket) {
     // linkQuality = 0;
-    // otherEndLinkQuality = 0;
-  }
-
-  if (Core::NowNs() - lastPacketRcvTime > 1 * Core::SECONDS) {
-    otherEndLinkQuality = 0;
   }
 }
 
@@ -468,8 +466,10 @@ void FHSS::timingControl() {
                             receivedPacket, fhssState);
 
   // --- Update interval correction for clock drift ---
-  trueSlotInterval = slotInterval + (int64_t)intervalCorrection +
-                     (receivedPacket ? slotTimingOffset * 0.0001 : 0);
+  trueSlotInterval =
+      slotInterval + (int64_t)intervalCorrection +
+      (receivedPacket ? slotTimingOffset * 0.00003 : 0) +
+      (fhssState == FHSSState::Searching && isRxSide ? slotInterval * 0.1 : 0);
 
   // --- Advance slot timing ---
   lastSlotStart = currentSlotStart;
@@ -480,6 +480,11 @@ void FHSS::timingControl() {
   if (currentSlotStart + interval < threadStart) {
     int64_t missed = (threadStart - currentSlotStart) / interval;
     currentSlotStart += missed * interval;
+
+    // Count the slots we had to fast-forward past: the task woke too late to
+    // service them at their boundary. This is a pure scheduling-latency
+    // metric, independent of RF packet loss.
+    missedSlotCounter += (uint32_t)missed;
 
     // Record missed rx slots as false in link quality buffer
     int64_t missedToRecord = missed > 100 ? 100 : missed;
@@ -533,7 +538,7 @@ void FHSS::timingControl() {
   bool hoppedChannel = false;
   // --- Channel hop (must happen BEFORE any radio operation) ---
   if (isRxSide && fhssState == FHSSState::Searching) {
-    if (threadStart - lastSearchHopTime >= slotInterval * 2.1) {
+    if (threadStart - lastSearchHopTime >= slotInterval * 2) {
       lastSearchHopTime = threadStart;
       hopChannel(true);
       hoppedChannel = true;
@@ -563,13 +568,13 @@ void FHSS::timingControl() {
   // act right when the slot starts.
   int64_t nextSlotStart =
       currentSlotStart + getAdjustedSlotInterval() + slotOffsetTime;
-  int64_t wakeupLeadTime = 1 * Core::MILLISECONDS;
+  int64_t wakeupLeadTime = 1.0 * Core::MILLISECONDS;
 
   uint8_t nextRoleReverseCounter = (roleReverseCounter + 1) % numTxPacketsToRx;
   bool nextSlotIsTx =
       isRxSide ? (nextRoleReverseCounter == 0) : (nextRoleReverseCounter != 0);
   if (!nextSlotIsTx) {
-    wakeupLeadTime += 0.3 * Core::MILLISECONDS; // Start RX slots 1ms early
+    // wakeupLeadTime += 0.3 * Core::MILLISECONDS; // Start RX slots 1ms early
   }
 
   setDeadline(nextSlotStart - wakeupLeadTime);

@@ -12,7 +12,9 @@ enum PacketTypes : uint8_t {
   Heartbeat = 1,
   LinkTelemetry =
       2, ///< 4-byte compact link telemetry (antenna, LQ, txPower, RSSI, SNR).
-  RxState = 3, ///< Current rx time, desync count etc.
+  RxState = 3,    ///< Current rx time, desync count etc.
+  UploadMode = 4, ///< OTA upload mode (for firmware updates).
+  SlotStats = 5,  ///< FHSS missed-slot (scheduling-latency) counter.
 };
 
 } // namespace VCTR::ExVectrLink::datalink

@@ -87,6 +87,12 @@ public:
   void resetDesyncCounter();
   uint32_t getDesyncCounter() const;
 
+  /// @brief Number of slots skipped because the FHSS task was scheduled too
+  /// late to service them at their boundary (i.e. the catch-up path in
+  /// timingControl() had to fast-forward the slot grid) -- distinct from
+  /// packets lost to a bad link. Cumulative since boot.
+  uint32_t getMissedSlotCounter() const;
+
   // ===================== Status =====================
 
   FHSSState getFhssState() const;
@@ -100,6 +106,12 @@ public:
 
   /// @brief Returns the current timing offset correction in nanoseconds.
   int64_t getTimingOffset() const;
+
+  /// @brief Returns the slot-interval clock-drift correction currently applied
+  /// (nanoseconds). This is the slow integrator compensating for the TX/RX
+  /// crystal frequency mismatch, distinct from getTimingOffset() (the per-slot
+  /// phase error). RX side only; ~0 on the TX side.
+  int64_t getIntervalCorrection() const;
 
   /// @brief Returns the actual slot interval including corrections (ns).
   int64_t getTrueSlotInterval() const;
@@ -133,7 +145,7 @@ private:
 
   /// @brief Number of trailer bytes appended to each outgoing frame.
   /// Layout: 1 bit data flag | 7 bits Quality | 4 bit slotCounter | 4 bit key
-  static constexpr size_t TRAILER_SIZE = 3;
+  static constexpr size_t TRAILER_SIZE = 2;
 
   // ---- Internal methods ----
   void generateChannelSequence(uint8_t key);
@@ -207,6 +219,7 @@ private:
   int64_t lastReceivedPacketTime = 0;
 
   uint32_t desyncCounter = 0;
+  uint32_t missedSlotCounter = 0;
   int64_t lastTxPrint = 0;
 
   // ---- Poll-based RX tracking ----
@@ -219,8 +232,6 @@ private:
   VCTR::Core::ListBuffer<ReceiveWindowSample, 100> receiveSuccesses;
   float linkQuality = 0;
   float packetQuality = 0;
-  float otherEndLinkQuality = 0;
-  float otherEndSnr = 0;
 };
 
 } // namespace VCTR::ExVectrLink::datalink
