@@ -145,28 +145,46 @@ bool Sx1280Diversity::setupTxPacket(const VCTR::network::DataPacket &packet) {
   }
 
   pendingTxLinkIndex = getTxLinkIndex();
-  return diversityLinks[pendingTxLinkIndex].link->setupTxPacket(packet);
-}
-
-void Sx1280Diversity::startTx() {
-  if (diversityLinkCount == 0) {
-    return;
+  if (!diversityLinks[pendingTxLinkIndex].link->setupTxPacket(packet)) {
+    return false;
   }
 
+  // Do ALL non-active-radio bookkeeping for this TX slot here, well before
+  // the caller's timing-critical busy-wait -> startTx() sequence, so
+  // startTx() itself has nothing left to do but trigger the active radio.
+  // This used to run inside startTx() (called right as the busy-wait
+  // releases at the precise slot boundary): an extra loop iteration, a
+  // redundant push(true) (push(true) already gets called on every link,
+  // including this one, by the caller's push() moments later -- see
+  // FHSS::transmitDataPacket()), and a virtual getRxPacketCount() call, all
+  // sitting between "busy-wait exits" and "the actual RADIO_SET_TX SPI
+  // command reaches the active radio". None of that belongs in the
+  // timing-critical path; the non-diversity (single-link) path never paid
+  // this cost since the loop body never had a second link to iterate over.
   activeTxLinkIndex = pendingTxLinkIndex;
   txInProgress = true;
-
   for (size_t i = 0; i < diversityLinkCount; i++) {
     if (i == activeTxLinkIndex) {
       continue;
     }
-
-    auto &linkInfo = diversityLinks[i];
-    linkInfo.link->push(true);
-    linkInfo.lastSeenRxPacketCount = linkInfo.link->getRxPacketCount();
+    // Snapshot each passive radio's RX count now so a packet it receives
+    // during our own TX slot (self-interference) is treated as already-seen
+    // once pull() resumes normal per-link processing after TX completes --
+    // see pull()'s txInProgress branch, which skips passive links entirely
+    // while a TX is in flight.
+    diversityLinks[i].lastSeenRxPacketCount =
+        diversityLinks[i].link->getRxPacketCount();
   }
 
-  diversityLinks[pendingTxLinkIndex].link->startTx();
+  return true;
+}
+
+void Sx1280Diversity::startTx() {
+  if (activeTxLinkIndex >= diversityLinkCount) {
+    return;
+  }
+  // Nothing but the actual trigger belongs here -- see setupTxPacket().
+  diversityLinks[activeTxLinkIndex].link->startTx();
 }
 
 size_t Sx1280Diversity::getNumChannels() const {

@@ -37,6 +37,13 @@ void FHSS::setIsRxSide(bool isRxSide) { this->isRxSide = isRxSide; }
 void FHSS::setSlotInterval(int64_t interval) { slotInterval = interval; }
 int64_t FHSS::getSlotInterval() const { return slotInterval; }
 
+void FHSS::setSyncLatencyCompensation(int64_t latencyNs) {
+  syncLatencyCompensation = latencyNs;
+}
+int64_t FHSS::getSyncLatencyCompensation() const {
+  return syncLatencyCompensation;
+}
+
 void FHSS::setSlotsPerHop(uint8_t slots) {
   if (slots > 16)
     slots = 16;
@@ -144,9 +151,10 @@ void FHSS::generateChannelSequence(uint8_t key) {
 
 void FHSS::syncTimer(int64_t receiveStartTime) {
 
-  // Error offset
-  constexpr int64_t kSyncLatencyCompensation = 500 * Core::MICROSECONDS;
-  receiveStartTime -= kSyncLatencyCompensation;
+  // Compensate the constant hardware latency between the true TX-side slot
+  // boundary and the driver-reported packet start time. Per-target value,
+  // set from HardwareConfig -- see setSyncLatencyCompensation().
+  receiveStartTime -= 1300 * Core::MICROSECONDS; // syncLatencyCompensation;
 
   int64_t referenceSlotStart = currentSlotStart;
   int64_t estimatedSlotStart = receiveStartTime - slotOffsetTime;
@@ -254,6 +262,8 @@ void FHSS::transmitDataPacket(network::DataPacket &packetData,
     // slot boundary.
     radioLink.push(true);
     // Busy-wait until the exact slot start time for precise TX alignment.
+    // auto margin = txTargetTime - Core::NowNs();
+    // LOG_MSG("TX slot margin: %.3f us", margin / Core::MICROSECONDS);
     while (Core::NowNs() < txTargetTime) {
     }
     radioLink.startTx();
@@ -566,7 +576,7 @@ void FHSS::timingControl() {
   // act right when the slot starts.
   int64_t nextSlotStart =
       currentSlotStart + getAdjustedSlotInterval() + slotOffsetTime;
-  int64_t wakeupLeadTime = 1.0 * Core::MILLISECONDS;
+  int64_t wakeupLeadTime = 1 * Core::MILLISECONDS;
 
   uint8_t nextRoleReverseCounter = (roleReverseCounter + 1) % numTxPacketsToRx;
   bool nextSlotIsTx =

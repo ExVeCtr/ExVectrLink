@@ -75,6 +75,21 @@ public:
   void setSlotInterval(int64_t interval);
   int64_t getSlotInterval() const;
 
+  /// @brief Set the sync latency compensation in nanoseconds (RX side only).
+  ///
+  /// Constant latency between the true TX-side slot boundary and the
+  /// driver-reported packet start time that syncTimer() subtracts before
+  /// computing the phase error. It absorbs everything the datasheet
+  /// time-on-air formula cannot capture: the far end's setTx() SPI command +
+  /// FS->TX startup ramp, the local SX1280's RX_DONE assertion delay after
+  /// the last symbol, and -- the reason this is per-target -- the local
+  /// slot-servicing time (SPI traffic per slot, scheduler wake latency),
+  /// which shifts where the RX grid must sit for both link directions to
+  /// have margin. Configure from the target's HardwareConfig; calibrate per
+  /// hardware target and per modulation settings.
+  void setSyncLatencyCompensation(int64_t latencyNs);
+  int64_t getSyncLatencyCompensation() const;
+
   /// @brief Set how many slots make up one hop cycle. Hop occurs at slot 0.
   void setSlotsPerHop(uint8_t slots);
   uint8_t getSlotsPerHop() const;
@@ -168,6 +183,9 @@ private:
   int64_t slotInterval = 10 * Core::MILLISECONDS;
   int64_t trueSlotInterval = slotInterval;
   size_t slotsPerHop = 4;
+
+  /// See setSyncLatencyCompensation(). Per-target; set from HardwareConfig.
+  int64_t syncLatencyCompensation = 740 * Core::MICROSECONDS;
 
   bool isRxSide = false;
   // After this amount of tx Packets, send an rx Packet. Max 16
