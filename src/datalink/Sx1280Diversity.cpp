@@ -284,7 +284,12 @@ void Sx1280Diversity::pull() {
   }
 
   size_t winningLinkIndex = kNoLink;
-  VCTR::network::DataPacket winningPacket;
+  // Only the timestamp is needed for the tie-break comparison below --
+  // getRxPacket() only carries valid RSSI/SNR/timestamp at this point, not
+  // the payload (see Sx1280_DirectI::fetchRxPayload()'s doc comment): the
+  // actual FIFO read is deferred until fetchRxPayload() is called on
+  // whichever radio wins, below, so a losing radio's FIFO is never read.
+  int64_t winningTimestamp = 0;
   int16_t winningSnr = std::numeric_limits<int16_t>::min();
 
   for (size_t i = 0; i < diversityLinkCount; i++) {
@@ -315,12 +320,12 @@ void Sx1280Diversity::pull() {
       }
     }
 
-    const auto candidatePacket = linkInfo.link->getRxPacket();
+    const int64_t candidateTimestamp = linkInfo.link->getRxPacket().timestamp;
     if (winningLinkIndex == kNoLink || linkInfo.lastPacketSnr > winningSnr ||
         (linkInfo.lastPacketSnr == winningSnr &&
-         candidatePacket.timestamp < winningPacket.timestamp)) {
+         candidateTimestamp < winningTimestamp)) {
       winningLinkIndex = i;
-      winningPacket = candidatePacket;
+      winningTimestamp = candidateTimestamp;
       winningSnr = linkInfo.lastPacketSnr;
     }
   }
@@ -331,12 +336,25 @@ void Sx1280Diversity::pull() {
     return;
   }
 
-  lastRxPacket = winningPacket;
+  // Defer the actual FIFO payload read to fetchRxPayload() -- the losing
+  // radio(s)' FIFO is simply never read.
+  pendingPayloadWinnerIndex = winningLinkIndex;
   lastDeliveredPacketRssi = diversityLinks[winningLinkIndex].lastPacketRssi;
   snrHistory.placeBack(diversityLinks[winningLinkIndex].lastPacketSnr, true);
   lastDeliveredPacketSnr = snrHistory.getMedian();
   rxPacketLatched = true;
   rxPacketCount++;
+}
+
+void Sx1280Diversity::fetchRxPayload() {
+  if (pendingPayloadWinnerIndex == kNoLink ||
+      pendingPayloadWinnerIndex >= diversityLinkCount) {
+    return;
+  }
+  auto *winner = diversityLinks[pendingPayloadWinnerIndex].link;
+  winner->fetchRxPayload();
+  lastRxPacket = winner->getRxPacket();
+  pendingPayloadWinnerIndex = kNoLink;
 }
 
 void Sx1280Diversity::refreshBestLink() {

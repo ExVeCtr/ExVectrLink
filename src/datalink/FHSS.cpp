@@ -152,7 +152,7 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
   // The modulo wrapping makes the phase error independent of how many
   // slots have elapsed since then.
 
-  receiveStartTime -= 1600 * Core::MICROSECONDS;
+  receiveStartTime -= 1400 * Core::MICROSECONDS;
 
   int64_t referenceSlotStart = currentSlotStart;
   int64_t estimatedSlotStart = receiveStartTime - slotOffsetTime;
@@ -377,6 +377,10 @@ void FHSS::taskThread() {
   const uint32_t newRxCount = radioLink.getRxPacketCount();
   if (newRxCount != lastSeenRxPacketCount) {
     lastSeenRxPacketCount = newRxCount;
+    // Only now fetch the actual FIFO payload bytes -- pull() alone only reads
+    // cheap RSSI/SNR/length status. In diversity this means the losing
+    // radio's FIFO is never read at all; see Sx1280_DirectI::fetchRxPayload().
+    radioLink.fetchRxPayload();
     receivePacket(radioLink.getRxPacket());
   }
 

@@ -49,6 +49,7 @@ public:
   int16_t getPacketSNR() const override;
   VCTR::network::DataPacket getRxPacket() const override;
   uint32_t getRxPacketCount() const override;
+  void fetchRxPayload() override;
 
   bool setupTxPacket(const VCTR::network::DataPacket &packet) override;
   void startTx() override;
@@ -96,6 +97,12 @@ private:
   uint32_t rxPacketCount = 0;
   bool rxPacketLatched = false;
   bool txInProgress = false;
+
+  // Index into diversityLinks[] of the radio that won the last completed RX
+  // (decided by pull() from RSSI/SNR alone, without touching either radio's
+  // FIFO), whose payload fetchRxPayload() still needs to pull. kNoLink once
+  // consumed / if nothing is pending.
+  size_t pendingPayloadWinnerIndex = kNoLink;
 };
 
 } // namespace VCTR::ExVectrLink::datalink
