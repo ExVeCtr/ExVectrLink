@@ -154,7 +154,8 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
   // Compensate the constant hardware latency between the true TX-side slot
   // boundary and the driver-reported packet start time. Per-target value,
   // set from HardwareConfig -- see setSyncLatencyCompensation().
-  receiveStartTime -= 1300 * Core::MICROSECONDS; // syncLatencyCompensation;
+  // For tuning: Higher improves TxLQ, lower improves RxLQ.
+  receiveStartTime -= 1400 * Core::MICROSECONDS; // syncLatencyCompensation;
 
   int64_t referenceSlotStart = currentSlotStart;
   int64_t estimatedSlotStart = receiveStartTime - slotOffsetTime;
@@ -477,7 +478,7 @@ void FHSS::timingControl() {
   trueSlotInterval =
       slotInterval + (int64_t)intervalCorrection +
       (receivedPacket ? slotTimingOffset * 0.0001 : 0) +
-      (fhssState == FHSSState::Searching && isRxSide ? slotInterval * 0.1 : 0);
+      (fhssState == FHSSState::Searching && isRxSide ? slotInterval * 0.9 : 0);
 
   // --- Advance slot timing ---
   lastSlotStart = currentSlotStart;
@@ -546,7 +547,7 @@ void FHSS::timingControl() {
   bool hoppedChannel = false;
   // --- Channel hop (must happen BEFORE any radio operation) ---
   if (isRxSide && fhssState == FHSSState::Searching) {
-    if (threadStart - lastSearchHopTime >= slotInterval * 2) {
+    if (threadStart - lastSearchHopTime >= slotInterval) {
       lastSearchHopTime = threadStart;
       hopChannel(true);
       hoppedChannel = true;

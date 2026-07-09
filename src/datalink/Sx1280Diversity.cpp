@@ -92,6 +92,26 @@ bool Sx1280Diversity::configureRadio() {
 }
 
 void Sx1280Diversity::startRx(int64_t timeout) {
+  // If the previous slot was our own TX, the passive radio(s) sat in RX on
+  // the same channel and likely received our own transmission at point-blank
+  // range. The snapshot in setupTxPacket() cannot cover this: it is taken
+  // BEFORE the TX, while the echo increments the passive radio's RX count
+  // only when its pull() runs AFTER the TX. Drain those echoes here --
+  // process the pending IRQ and resync the seen-count -- without letting
+  // their near-field RSSI/SNR into lastPacketRssi/lastPacketSnr, where they
+  // would poison refreshBestLink()'s TX-antenna choice and the buffered
+  // RSSI/SNR reported below.
+  if (txInProgress) {
+    for (size_t i = 0; i < diversityLinkCount; i++) {
+      if (i == activeTxLinkIndex) {
+        continue;
+      }
+      auto &linkInfo = diversityLinks[i];
+      linkInfo.link->pull();
+      linkInfo.lastSeenRxPacketCount = linkInfo.link->getRxPacketCount();
+    }
+  }
+
   rxPacketLatched = false;
   txInProgress = false;
   activeTxLinkIndex = kNoLink;
@@ -167,11 +187,11 @@ bool Sx1280Diversity::setupTxPacket(const VCTR::network::DataPacket &packet) {
     if (i == activeTxLinkIndex) {
       continue;
     }
-    // Snapshot each passive radio's RX count now so a packet it receives
-    // during our own TX slot (self-interference) is treated as already-seen
-    // once pull() resumes normal per-link processing after TX completes --
-    // see pull()'s txInProgress branch, which skips passive links entirely
-    // while a TX is in flight.
+    // Snapshot each passive radio's RX count so anything already pending is
+    // not misattributed later. Packets a passive radio receives DURING the
+    // TX slot (self-interference echoes) only increment its RX count on the
+    // pull() after TX completes, so they are drained separately in
+    // startRx()'s txInProgress branch.
     diversityLinks[i].lastSeenRxPacketCount =
         diversityLinks[i].link->getRxPacketCount();
   }
