@@ -62,6 +62,40 @@ void FHSS::setRxSlotIndex(uint8_t index) {
 uint8_t FHSS::getRxSlotIndex() const { return numTxPacketsToRx; }
 
 void FHSS::resetDesyncCounter() { desyncCounter = 0; }
+
+void FHSS::triggerCounterDesyncTest() {
+  if (channelSequence.size() > 0) {
+    // Roughly half way around the hop sequence -- as far from the current
+    // channel as the sequence allows.
+    currentChannelIdx = (currentChannelIdx + channelSequence.size() / 2 + 1) %
+                        channelSequence.size();
+    radioLink.setChannel(channelSequence[currentChannelIdx]);
+  }
+  if (numTxPacketsToRx > 0) {
+    roleReverseCounter =
+        (roleReverseCounter + numTxPacketsToRx / 2 + 1) % numTxPacketsToRx;
+  }
+  if (slotsPerHop > 0) {
+    slotCounter = (slotCounter + slotsPerHop / 2 + 1) % slotsPerHop;
+  }
+}
+
+void FHSS::triggerFullResyncTest() {
+  triggerCounterDesyncTest();
+  if (!isRxSide) {
+    return;
+  }
+  // Mirrors taskThread()'s own desync-timeout reset (see the Synced/Syncing
+  // -> Searching transitions there) so this test exercises the exact same
+  // reacquisition path, just triggered on demand instead of after the
+  // 0.5-3 s wait for lastPacketRcvTime to go stale.
+  fhssState = FHSSState::Searching;
+  desyncCounter++;
+  intervalCorrection = 0;
+  slotOffsetTime = 0;
+  slotTimingOffset = 0;
+  receiveSuccesses.clear();
+}
 uint32_t FHSS::getDesyncCounter() const { return desyncCounter; }
 
 uint32_t FHSS::getMissedSlotCounter() const { return missedSlotCounter; }
@@ -155,7 +189,7 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
   // boundary and the driver-reported packet start time. Per-target value,
   // set from HardwareConfig -- see setSyncLatencyCompensation().
   // For tuning: Higher improves TxLQ, lower improves RxLQ.
-  receiveStartTime -= 1400 * Core::MICROSECONDS; // syncLatencyCompensation;
+  receiveStartTime -= syncLatencyCompensation;
 
   int64_t referenceSlotStart = currentSlotStart;
   int64_t estimatedSlotStart = receiveStartTime - slotOffsetTime;
@@ -317,12 +351,35 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
   }
   if (isRxSide) {
     if (roleReverseCounter != txRoleReverseCounter) {
+      // This packet passed both the LoRa CRC16 and the trailer checksum, so
+      // its counter is almost certainly right and OURS is off -- typically a
+      // missed-slot catch-up that advanced the local counters wrongly. Every
+      // mismatched packet is rejected below despite being perfectly good, so
+      // waiting 10 of them (the old rule) burned ~10 slots of LQ per desync
+      // and could meanwhile place our TX slot on top of the other side's
+      // transmissions. Two consecutive packets agreeing on the same shift is
+      // conclusive (random corruption reproducing the same delta twice is
+      // implausible): resnap immediately and keep Synced -- the timing sync
+      // is untouched, only the counters were shifted. Fall back to the old
+      // threshold with a state drop for inconsistent garbage.
+      const uint8_t delta =
+          (uint8_t)((txRoleReverseCounter + numTxPacketsToRx -
+                     (roleReverseCounter % numTxPacketsToRx)) %
+                    numTxPacketsToRx);
       falseCounterCount++;
-      if (falseCounterCount > 10) {
+      if (falseCounterCount >= 2 && delta == lastCounterDelta) {
+        roleReverseCounter = txRoleReverseCounter;
+        slotCounter = txSlotCounter;
+        counterResyncCount++;
+        falseCounterCount = 0;
+      } else if (falseCounterCount > 10) {
         fhssState = FHSSState::Syncing;
         roleReverseCounter = txRoleReverseCounter;
         slotCounter = txSlotCounter;
+        counterResyncCount++;
+        falseCounterCount = 0;
       }
+      lastCounterDelta = delta;
     }
   }
   syncTimer(packet.timestamp);
@@ -379,7 +436,53 @@ void FHSS::taskThread() {
 
   // Poll the radio for any completed RX operations.
   radioLink.pull();
-  const uint32_t newRxCount = radioLink.getRxPacketCount();
+  uint32_t newRxCount = radioLink.getRxPacketCount();
+
+  // A packet can still be in the air at this wakeup: RX_DONE lands only
+  // ~1 ms before the slot boundary with the current airtime/slot budget, so
+  // a transmission that left the other side slightly late (its scheduler
+  // woke past the busy-wait lead) has not completed yet. Without this, the
+  // slot processing below would re-arm RX / hop channel, aborting the
+  // reception and losing the packet outright even though it was only
+  // marginally late. Grant in-flight receptions a bounded grace window:
+  // keep polling until the packet completes (or errors out), capped so a
+  // noise-triggered false preamble detect can never stall the schedule.
+  //
+  // The cap depends on the upcoming slot's role:
+  //  - RX next: up to ~0.5 ms PAST the boundary. Arming RX slightly late is
+  //    safe -- the preamble is 12 symbols (~1.9 ms) and detection only
+  //    needs part of it.
+  //  - TX next: up to ~0.5 ms BEFORE the boundary, leaving room for the TX
+  //    prep (hop, FIFO load, push) plus the busy-wait so the transmission
+  //    still leaves exactly on the boundary the other side syncs to. A
+  //    blanket skip here instead loses the packet before every own-TX slot
+  //    outright once tuning settles packets past the wakeup: exactly 1 of
+  //    numTxPacketsToRx-1 receive slots per cycle, a hard LQ ceiling.
+  if (newRxCount == lastSeenRxPacketCount &&
+      fhssState != FHSSState::Searching && radioLink.isReceivingPacket()) {
+    uint8_t nextRoleReverseCounter =
+        (roleReverseCounter + 1) % numTxPacketsToRx;
+    bool nextSlotIsTx = isRxSide ? (nextRoleReverseCounter == 0)
+                                 : (nextRoleReverseCounter != 0);
+    const int64_t nextSlotBoundary =
+        currentSlotStart + getAdjustedSlotInterval() + slotOffsetTime;
+    const int64_t graceDeadline =
+        nextSlotBoundary + (nextSlotIsTx ? -500 : 500) * Core::MICROSECONDS;
+    while (Core::NowNs() < graceDeadline) {
+      radioLink.pull();
+      newRxCount = radioLink.getRxPacketCount();
+      if (newRxCount != lastSeenRxPacketCount ||
+          !radioLink.isReceivingPacket()) {
+        break;
+      }
+    }
+    if (newRxCount != lastSeenRxPacketCount) {
+      graceRescueCount++;
+    } else {
+      graceExpireCount++;
+    }
+  }
+
   if (newRxCount != lastSeenRxPacketCount) {
     lastSeenRxPacketCount = newRxCount;
     // Only now fetch the actual FIFO payload bytes -- pull() alone only reads

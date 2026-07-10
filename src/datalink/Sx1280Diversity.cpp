@@ -384,6 +384,18 @@ void Sx1280Diversity::pull() {
   rxPacketCount++;
 }
 
+bool Sx1280Diversity::isReceivingPacket() const {
+  if (txInProgress) {
+    return false;
+  }
+  for (size_t i = 0; i < diversityLinkCount; i++) {
+    if (diversityLinks[i].link->isReceivingPacket()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void Sx1280Diversity::fetchRxPayload() {
   if (pendingPayloadWinnerIndex == kNoLink ||
       pendingPayloadWinnerIndex >= diversityLinkCount) {

@@ -102,11 +102,42 @@ public:
   void resetDesyncCounter();
   uint32_t getDesyncCounter() const;
 
+  /// @brief Test hook: jumps to a far-away channel and shifts the local
+  /// slot/role counters, without touching fhssState or the timing filters.
+  /// Simulates the other side's counters having silently diverged (e.g. a
+  /// missed-slot catch-up misfire) while everything else about the link
+  /// stays healthy -- exercises the resync-on-agreement path in
+  /// receivePacket() rather than a full reacquisition.
+  void triggerCounterDesyncTest();
+
+  /// @brief Test hook: same channel/counter perturbation as
+  /// triggerCounterDesyncTest(), but additionally forces fhssState straight
+  /// to Searching (RX side only) -- the same reset timingControl()'s own
+  /// desync-timeout path performs, just without waiting the 0.5-3 s for that
+  /// timeout to fire, so reacquisition can be tested back-to-back.
+  void triggerFullResyncTest();
+
   /// @brief Number of slots skipped because the FHSS task was scheduled too
   /// late to service them at their boundary (i.e. the catch-up path in
   /// timingControl() had to fast-forward the slot grid) -- distinct from
   /// packets lost to a bad link. Cumulative since boot.
   uint32_t getMissedSlotCounter() const;
+
+  /// @brief Times the local slot/role counters were resnapped to the counter
+  /// received in a packet trailer (RX side only). Each event means the local
+  /// counters had drifted from the other side -- typically a missed-slot
+  /// catch-up misfire -- and good packets were being rejected until the
+  /// resnap. Cumulative since boot.
+  uint32_t getCounterResyncCount() const { return counterResyncCount; }
+
+  /// @brief Packets that were only received because the in-flight grace
+  /// window at the slot wakeup waited for their late RX_DONE. Cumulative.
+  uint32_t getGraceRescueCount() const { return graceRescueCount; }
+
+  /// @brief Times the grace window expired without the reception completing
+  /// (very late packet lost anyway, or a noise-triggered false preamble
+  /// detect). Cumulative since boot.
+  uint32_t getGraceExpireCount() const { return graceExpireCount; }
 
   // ===================== Status =====================
 
@@ -185,7 +216,7 @@ private:
   size_t slotsPerHop = 4;
 
   /// See setSyncLatencyCompensation(). Per-target; set from HardwareConfig.
-  int64_t syncLatencyCompensation = 740 * Core::MICROSECONDS;
+  int64_t syncLatencyCompensation = 900 * Core::MICROSECONDS;
 
   bool isRxSide = false;
   // After this amount of tx Packets, send an rx Packet. Max 16
@@ -232,12 +263,16 @@ private:
   int64_t lastSearchHopTime = 0;
   int64_t syncedStartTime = 0;
   size_t falseCounterCount = 0;
+  uint8_t lastCounterDelta = 0;
   uint8_t lastReceivedCounterByte = 0;
   uint8_t lastReceivedPacketCrc = 0;
   int64_t lastReceivedPacketTime = 0;
 
   uint32_t desyncCounter = 0;
   uint32_t missedSlotCounter = 0;
+  uint32_t counterResyncCount = 0;
+  uint32_t graceRescueCount = 0;
+  uint32_t graceExpireCount = 0;
   int64_t lastTxPrint = 0;
 
   // ---- Poll-based RX tracking ----

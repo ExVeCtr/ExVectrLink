@@ -75,6 +75,8 @@ public:
   void push(bool keepOscRunning = false) override;
   void pull() override;
 
+  bool isReceivingPacket() const override;
+
 private:
   void refreshBestLink();
 
