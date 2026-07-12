@@ -35,6 +35,17 @@ private:
   /// a fade of a few hundred ms is far shorter than this.
   static constexpr int64_t kLinkFreshWindowNs = 1000LL * 1000 * 1000;
 
+  /// Floors written over a link's stored RSSI/SNR when a slot's packet
+  /// arrived on another radio but not on this one (see pull()): the missed
+  /// reception IS the measurement -- "worse than anything a real packet can
+  /// report" -- so the silent radio immediately loses best-link/TX-antenna
+  /// comparisons instead of competing with its frozen last-known-good
+  /// values. Chosen below any physically possible reading but within sane
+  /// telemetry range (not INT16_MIN) so a snapshot of these values doesn't
+  /// wreck downstream int8 packing.
+  static constexpr int16_t kWorstCaseRssi = -127; ///< dBm floor.
+  static constexpr int16_t kWorstCaseSnr = -100;  ///< dB, real min is ~-20.
+
 public:
   Sx1280Diversity() = default;
   Sx1280Diversity(

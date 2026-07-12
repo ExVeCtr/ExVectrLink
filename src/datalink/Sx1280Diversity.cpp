@@ -332,6 +332,8 @@ void Sx1280Diversity::pull() {
   int64_t winningTimestamp = 0;
   int16_t winningSnr = std::numeric_limits<int16_t>::min();
 
+  bool receivedThisPull[kMaxDiversityLinks] = {};
+
   for (size_t i = 0; i < diversityLinkCount; i++) {
     auto &linkInfo = diversityLinks[i];
     linkInfo.link->pull();
@@ -341,6 +343,7 @@ void Sx1280Diversity::pull() {
       continue;
     }
 
+    receivedThisPull[i] = true;
     linkInfo.lastSeenRxPacketCount = newRxCount;
     linkInfo.lastPacketRssi = linkInfo.link->getPacketRSSI();
     linkInfo.lastPacketSnr = linkInfo.link->getPacketSNR();
@@ -368,6 +371,26 @@ void Sx1280Diversity::pull() {
       winningLinkIndex = i;
       winningTimestamp = candidateTimestamp;
       winningSnr = linkInfo.lastPacketSnr;
+    }
+  }
+
+  // Ground-truth demotion: this slot's packet arrived, so a radio that did
+  // NOT deliver it genuinely failed to receive right now -- overwrite its
+  // stored SNR/RSSI with worst-case floors instead of letting stale
+  // last-known-good values keep competing in refreshBestLink(). Stale values
+  // caused two real failures: near the range limit only one radio still
+  // hears anything, and a latched-up radio stops receiving entirely -- in
+  // both cases the silent radio's frozen SNR kept winning the TX-antenna
+  // pick for ~half the slots. Done only on the pull that latches the cycle's
+  // packet (one-shot per slot): slots where NO radio received, and our own
+  // TX slots, carry no per-radio information and demote nothing. A demoted
+  // radio recovers instantly -- its next real packet overwrites the floors.
+  if (winningLinkIndex != kNoLink && !rxPacketLatched) {
+    for (size_t i = 0; i < diversityLinkCount; i++) {
+      if (!receivedThisPull[i]) {
+        diversityLinks[i].lastPacketRssi = kWorstCaseRssi;
+        diversityLinks[i].lastPacketSnr = kWorstCaseSnr;
+      }
     }
   }
 
