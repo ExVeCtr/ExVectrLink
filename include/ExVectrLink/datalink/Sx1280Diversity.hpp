@@ -17,11 +17,23 @@ private:
     uint32_t lastSeenRxPacketCount = 0;
     int16_t lastPacketRssi = 0;
     int16_t lastPacketSnr = std::numeric_limits<int16_t>::min();
+    /// When this radio last delivered a real received packet (Core::NowNs()).
+    /// 0 until it has received anything. Used to age lastPacketRssi/Snr: a
+    /// radio that stopped receiving (wedged/reset chip) keeps its frozen
+    /// last-known SNR forever, and comparing that against the live radio's
+    /// fluctuating SNR made refreshBestLink() ping-pong the TX antenna onto
+    /// the dead radio for ~half of all transmissions.
+    int64_t lastPacketTimeNs = 0;
   };
 
   static constexpr size_t kMaxDiversityLinks = 2;
   static constexpr size_t kNoLink = static_cast<size_t>(-1);
   static constexpr size_t kSnrMedianWindow = 10;
+  /// A link with no received packet within this window is considered stale
+  /// and is not eligible as best/TX link while any other link is fresh. On
+  /// a healthy link every radio receives nearly every non-TX slot, so even
+  /// a fade of a few hundred ms is far shorter than this.
+  static constexpr int64_t kLinkFreshWindowNs = 1000LL * 1000 * 1000;
 
 public:
   Sx1280Diversity() = default;

@@ -1,3 +1,5 @@
+#include "ExVectrCore/time_definitions.hpp"
+
 #include "ExVectrLink/datalink/Sx1280Diversity.hpp"
 
 namespace VCTR::ExVectrLink::datalink {
@@ -342,6 +344,7 @@ void Sx1280Diversity::pull() {
     linkInfo.lastSeenRxPacketCount = newRxCount;
     linkInfo.lastPacketRssi = linkInfo.link->getPacketRSSI();
     linkInfo.lastPacketSnr = linkInfo.link->getPacketSNR();
+    linkInfo.lastPacketTimeNs = Core::NowNs();
 
     if (!currentCycleHasPacket) {
       currentCycleHasPacket = true;
@@ -413,18 +416,52 @@ void Sx1280Diversity::refreshBestLink() {
     return;
   }
 
-  size_t bestLinkIndex =
+  // Age the candidates first: a radio that stopped receiving (wedged or
+  // reset chip) keeps its frozen last-known SNR forever, and comparing that
+  // against a live radio's naturally fluctuating SNR made this selection
+  // ping-pong the TX antenna onto the dead radio for roughly half of all
+  // transmissions (observed as TxLQ ~50% after an overnight run while RxLQ
+  // stayed 100% off the healthy radio). A stale link is only eligible when
+  // NO link is fresh -- e.g. during Searching or a total link outage, where
+  // the old highest-SNR behavior is still the best guess.
+  const int64_t now = Core::NowNs();
+  auto isFresh = [&](size_t i) {
+    return diversityLinks[i].lastPacketTimeNs != 0 &&
+           now - diversityLinks[i].lastPacketTimeNs < kLinkFreshWindowNs;
+  };
+
+  bool anyFresh = false;
+  for (size_t i = 0; i < diversityLinkCount; i++) {
+    if (isFresh(i)) {
+      anyFresh = true;
+      break;
+    }
+  }
+
+  auto isEligible = [&](size_t i) { return !anyFresh || isFresh(i); };
+
+  // Seed with the current selection when eligible so SNR ties keep the
+  // current antenna (same hysteresis as before).
+  size_t bestLinkIndex = kNoLink;
+  int16_t bestSnr = std::numeric_limits<int16_t>::min();
+  const size_t current =
       (currentBestLinkIndex < diversityLinkCount) ? currentBestLinkIndex : 0;
-  int16_t bestSnr = diversityLinks[bestLinkIndex].lastPacketSnr;
+  if (isEligible(current)) {
+    bestLinkIndex = current;
+    bestSnr = diversityLinks[current].lastPacketSnr;
+  }
 
   for (size_t i = 0; i < diversityLinkCount; i++) {
-    if (diversityLinks[i].lastPacketSnr > bestSnr) {
+    if (!isEligible(i)) {
+      continue;
+    }
+    if (bestLinkIndex == kNoLink || diversityLinks[i].lastPacketSnr > bestSnr) {
       bestSnr = diversityLinks[i].lastPacketSnr;
       bestLinkIndex = i;
     }
   }
 
-  currentBestLinkIndex = bestLinkIndex;
+  currentBestLinkIndex = (bestLinkIndex == kNoLink) ? current : bestLinkIndex;
 }
 
 } // namespace VCTR::ExVectrLink::datalink
