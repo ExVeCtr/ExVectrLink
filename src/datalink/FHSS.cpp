@@ -108,8 +108,6 @@ FHSSState FHSS::getFhssState() const { return fhssState; }
 
 float FHSS::getLinkQuality() const { return linkQuality; }
 
-float FHSS::getPacketQuality() const { return packetQuality; }
-
 int64_t FHSS::getTimingOffset() const { return slotTimingOffset; }
 
 int64_t FHSS::getIntervalCorrection() const {
@@ -233,7 +231,7 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
       if (slotTimingOffset > slotInterval / 10) {
         syncedStartTime = Core::NowNs();
       } else if (Core::NowNs() - syncedStartTime > 500 * Core::MILLISECONDS &&
-                 packetQuality > lqThres && packetQuality > 0.5f) {
+                 linkQuality > lqThres && linkQuality > 0.5f) {
         fhssState = FHSSState::Synced;
       }
 
@@ -388,7 +386,6 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
     receivedPacket = true;
     falseCounterCount = 0;
     if (packet.payload.size() > 2) {
-      receivedPacketData = true;
       auto dataPacket = packet;
       dataPacket.payload.popDiscard(2);
 
@@ -534,28 +531,17 @@ void FHSS::updateLinkQuality() {
 
   if (receiveSuccesses.size() < 2) {
     linkQuality = 0;
-    packetQuality = 0;
     return;
   }
 
   size_t successCount = 0;
-  size_t dataSuccessCount = 0;
   for (size_t i = 0; i < receiveSuccesses.size(); i++) {
-    if (receiveSuccesses[i].receivedPacket) {
+    if (receiveSuccesses[i]) {
       successCount++;
     }
-    if (receiveSuccesses[i].receivedPacketData) {
-      dataSuccessCount++;
-    }
   }
 
-  linkQuality = (float)dataSuccessCount / (float)receiveSuccesses.size();
-  packetQuality = (float)successCount / (float)receiveSuccesses.size();
-
-  if (!receiveSuccesses(-1).receivedPacket &&
-      !receiveSuccesses(-2).receivedPacket) {
-    // linkQuality = 0;
-  }
+  linkQuality = (float)successCount / (float)receiveSuccesses.size();
 }
 
 void FHSS::timingControl() {
@@ -606,7 +592,7 @@ void FHSS::timingControl() {
       bool missedSlotIsTx = isRxSide ? (missedRoleReverseCounter == 0)
                                      : (missedRoleReverseCounter != 0);
       if (!missedSlotIsTx) {
-        receiveSuccesses.placeBack(ReceiveWindowSample{false, false}, true);
+        receiveSuccesses.placeBack(false, true);
       }
     }
 
@@ -629,8 +615,7 @@ void FHSS::timingControl() {
 
   // --- Record link quality for the previous slot ---
   if (lastSlotWasReceive) {
-    receiveSuccesses.placeBack(
-        ReceiveWindowSample{receivedPacket, receivedPacketData}, true);
+    receiveSuccesses.placeBack(receivedPacket, true);
   }
 
   // --- Advance counters for this new slot ---
@@ -645,7 +630,6 @@ void FHSS::timingControl() {
 
   lastSlotWasReceive = !thisSlotIsTx;
   receivedPacket = false;
-  receivedPacketData = false;
 
   bool hoppedChannel = false;
   // --- Channel hop (must happen BEFORE any radio operation) ---

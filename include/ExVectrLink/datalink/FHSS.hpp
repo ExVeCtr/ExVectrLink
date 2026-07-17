@@ -143,12 +143,11 @@ public:
 
   FHSSState getFhssState() const;
 
-  /// @brief Returns link quality as 0.0 (no payload packets) to 1.0
-  /// (payload in every receive slot).
+  /// @brief Returns link quality as 0.0 (no packets) to 1.0 (a valid
+  /// packet in every receive slot). Counts any valid frame, with or
+  /// without payload data -- an empty keep-alive frame is just as much
+  /// proof of a healthy link as a full one.
   float getLinkQuality() const;
-
-  /// @brief Returns packet quality as 0.0 (no link) to 1.0 (perfect).
-  float getPacketQuality() const;
 
   /// @brief Returns the current timing offset correction in nanoseconds.
   int64_t getTimingOffset() const;
@@ -182,11 +181,6 @@ public:
   void taskThread() override;
 
 private:
-  struct ReceiveWindowSample {
-    bool receivedPacket = false;
-    bool receivedPacketData = false;
-  };
-
   static constexpr uint8_t OTA_VERSION = 2;
 
   /// @brief Number of trailer bytes appended to each outgoing frame.
@@ -249,7 +243,6 @@ private:
   size_t roleReverseCounter = 0; // Counts from 0 to numTxPacketsToRx
   bool lastSlotWasReceive = false;
   bool receivedPacket = false;
-  bool receivedPacketData = false;
   bool txSlotTrig = false;
   int64_t lastPacketRcvTime = 0;
   bool thisSlotIsTx = false;
@@ -282,9 +275,8 @@ private:
   VCTR::network::DataPacket packetToSend;
 
   // ---- Link quality tracking ----
-  VCTR::Core::ListBuffer<ReceiveWindowSample, 100> receiveSuccesses;
+  VCTR::Core::ListBuffer<bool, 100> receiveSuccesses;
   float linkQuality = 0;
-  float packetQuality = 0;
 };
 
 } // namespace VCTR::ExVectrLink::datalink
