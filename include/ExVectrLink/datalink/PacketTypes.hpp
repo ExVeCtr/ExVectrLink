@@ -28,6 +28,10 @@ enum PacketTypes : uint8_t {
       8, ///< Sets the receiving side's FHSS sync latency compensation (see
          ///< FHSS::setSyncLatencyCompensation()). 2-byte little-endian
          ///< payload, microseconds, 0-2000.
+  ResetRcGapStat =
+      9, ///< Resets the receiving side's max-gap-between-CRSF-RC-frames
+         ///< statistic (see getCrsfMaxRcFrameGapUs(); the gap is reported
+         ///< back inside the SlotStats packet). No payload.
 };
 
 } // namespace VCTR::ExVectrLink::datalink
