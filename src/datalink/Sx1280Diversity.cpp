@@ -57,6 +57,23 @@ bool Sx1280Diversity::setDesignatedTxLink(
   return false;
 }
 
+bool Sx1280Diversity::setDesignatedTxLinkIndex(size_t index) {
+  if (index == kAutoTxLink) {
+    designatedTxLink = kNoLink; // Back to diversity choosing per slot.
+    return true;
+  }
+  if (index >= diversityLinkCount) {
+    return false;
+  }
+  designatedTxLink = index;
+  return true;
+}
+
+size_t Sx1280Diversity::getDesignatedTxLinkIndex() const {
+  return (designatedTxLink < diversityLinkCount) ? designatedTxLink
+                                                 : kAutoTxLink;
+}
+
 size_t Sx1280Diversity::getTxLinkIndex() const {
   if (diversityLinkCount == 0) {
     return 0;

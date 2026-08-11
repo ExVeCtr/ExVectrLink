@@ -47,6 +47,10 @@ private:
   static constexpr int16_t kWorstCaseSnr = -100;  ///< dB, real min is ~-20.
 
 public:
+  /// @brief Index meaning "no designated TX link": diversity picks the TX
+  /// antenna per slot, which is the default behaviour.
+  static constexpr size_t kAutoTxLink = static_cast<size_t>(-1);
+
   Sx1280Diversity() = default;
   Sx1280Diversity(
       std::initializer_list<VCTR::network::datalink::Sx1280_DirectI *> links);
@@ -64,6 +68,20 @@ public:
    * @return true if the lgiven link is in the diversity and has been set.
    */
   bool setDesignatedTxLink(const VCTR::network::datalink::Sx1280_DirectI &link);
+
+  /**
+   * @brief Use only the link with the given index for tx, or hand the choice
+   * back to diversity with kAutoTxLink. Rx still uses any link either way.
+   * @return true if the index was applied, false if there is no such link (the
+   * designation is left untouched then).
+   */
+  bool setDesignatedTxLinkIndex(size_t index);
+
+  /**
+   * @returns the index of the link tx is pinned to, or kAutoTxLink when
+   * diversity is choosing.
+   */
+  size_t getDesignatedTxLinkIndex() const;
 
   bool configureRadio() override;
 
