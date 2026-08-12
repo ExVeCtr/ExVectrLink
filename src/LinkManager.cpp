@@ -101,7 +101,8 @@ bool LinkManager::transmitDataframe(
 
   VCTR::network::DataPacket dataPacket;
   dataPacket.payload = dataframe.payload;
-  dataPacket.payload.append(VCTR::ExVectrLink::datalink::PacketTypes::Data);
+  dataPacket.payload.append(VCTR::ExVectrLink::datalink::encodePacketType(
+      VCTR::ExVectrLink::datalink::PacketTypes::Data));
   return link.transmitDataframe(dataPacket);
 }
 
@@ -112,8 +113,16 @@ bool LinkManager::isChannelBlocked() const { return link.isChannelBlocked(); }
 void LinkManager::receivePacket(const VCTR::network::DataPacket &packet) {
   int64_t receiveTime = Core::NowNs();
 
-  auto packetType = packet.payload[packet.payload.size() - 1];
-  if (packetType == VCTR::ExVectrLink::datalink::PacketTypes::Data) {
+  if (packet.payload.size() == 0) {
+    return;
+  }
+  // 7 bits of type plus a parity bit -- a byte that fails parity has been
+  // corrupted, so the frame is not what it claims to be (see
+  // encodePacketType()).
+  const uint8_t packetTypeByte = packet.payload[packet.payload.size() - 1];
+  if (VCTR::ExVectrLink::datalink::packetTypeIsValid(packetTypeByte) &&
+      VCTR::ExVectrLink::datalink::decodePacketType(packetTypeByte) ==
+          VCTR::ExVectrLink::datalink::PacketTypes::Data) {
     VCTR::network::DataPacket dataPacket;
     dataPacket.payload.setSize(packet.payload.size() - 1);
     std::memcpy(dataPacket.payload.getPtr(), packet.payload.getPtr(),
