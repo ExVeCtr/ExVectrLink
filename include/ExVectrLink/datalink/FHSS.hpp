@@ -10,6 +10,8 @@
 #include "ExVectrNetwork/datalink/RadioI.hpp"
 #include "ExVectrNetwork/datalink/sx1280/Sx1280_Direct.hpp"
 
+#include "ExVectrLink/datalink/AirProfile.hpp"
+
 namespace VCTR::ExVectrLink::datalink {
 
 enum class FHSSState : uint8_t {
@@ -91,13 +93,50 @@ public:
   int64_t getSyncLatencyCompensation() const;
 
   /// @brief Set how many slots make up one hop cycle. Hop occurs at slot 0.
+  /// Clamped to 1..4: the trailer carries the slot counter in 2 bits.
   void setSlotsPerHop(uint8_t slots);
   uint8_t getSlotsPerHop() const;
 
-  /// @brief Set the number of tx packets to transmit before a rx packet is
-  /// sent. Max 16.
+  /// @brief Set the role-reversal period (numTxPacketsToRx): one slot in
+  /// every `index` slots is sent by the RX side, the others by the TX side.
+  /// 2 gives 1:1. Clamped to 2..64: the trailer carries the role counter in
+  /// 6 bits.
   void setRxSlotIndex(uint8_t index);
   uint8_t getRxSlotIndex() const;
+
+  /// @brief Seed of the trailer checksum besides the key (default
+  /// OTA_VERSION, the FPV value). Units with different link versions reject
+  /// each other's frames.
+  void setLinkVersion(uint8_t version);
+  uint8_t getLinkVersion() const { return linkVersion; }
+
+  /// @brief Fixed on-air frame length (payload + 2-byte trailer). 0 (default,
+  /// FPV) = variable payload of up to 9 bytes. With a fixed length every
+  /// frame is zero-padded to it and getMaxPacketSize() is length - 2. The
+  /// radios must be configured to the same fixed length.
+  void setFixedFrameLength(uint8_t length);
+  uint8_t getFixedFrameLength() const { return fixedFrameLength; }
+
+  /// @brief How long before each slot boundary the task wakes (default 1 ms).
+  /// TX preparation (payload, FIFO load) happens inside this lead; the rest
+  /// is busy-waited so the transmission starts exactly on the boundary.
+  void setWakeupLead(int64_t leadNs);
+  int64_t getWakeupLead() const { return wakeupLead; }
+
+  /// @brief Pull mode for own TX slots (default nullptr: push mode via
+  /// transmitDataframe(), as FPV). When set, the provider fills the payload
+  /// of every own TX slot right before it is sent, and transmitDataframe()
+  /// is not used.
+  void setTxPayloadProvider(FhssTxProviderI *provider) { txProvider = provider; }
+
+  /// @brief Applies slot interval, slots per hop, role period, wakeup lead,
+  /// fixed frame length, link version and hop key from a profile. Call before
+  /// the task starts. The FPV firmware never calls this (its defaults are
+  /// kFpvProfile).
+  void applyProfile(const AirProfile &profile);
+
+  /// @brief True if this instance is the RX (follower) side.
+  bool getIsRxSide() const { return isRxSide; }
 
   void resetDesyncCounter();
   uint32_t getDesyncCounter() const;
@@ -184,7 +223,8 @@ private:
   static constexpr uint8_t OTA_VERSION = 2;
 
   /// @brief Number of trailer bytes appended to each outgoing frame.
-  /// Layout: 1 bit data flag | 7 bits Quality | 4 bit slotCounter | 4 bit key
+  /// Layout: byte 1 = role counter (bits 7..2) | slot counter (bits 1..0),
+  /// byte 2 = XOR checksum seeded with key + link version + side bit.
   static constexpr size_t TRAILER_SIZE = 2;
 
   // ---- Internal methods ----
@@ -215,6 +255,12 @@ private:
   bool isRxSide = false;
   // After this amount of tx Packets, send an rx Packet. Max 16
   uint8_t numTxPacketsToRx = 15;
+
+  // Network-mode parameters. The defaults keep the FPV behaviour.
+  uint8_t linkVersion = OTA_VERSION;
+  uint8_t fixedFrameLength = 0;
+  int64_t wakeupLead = 1 * Core::MILLISECONDS;
+  FhssTxProviderI *txProvider = nullptr;
 
   // ===================== State =====================
 

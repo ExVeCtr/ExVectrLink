@@ -9,6 +9,7 @@
 #include "ExVectrNetwork/datalink/RadioI.hpp"
 
 #include "ExVectrLink/datalink/FHSS.hpp"
+#include "ExVectrLink/datalink/FhssMath.hpp"
 
 namespace VCTR::ExVectrLink::datalink {
 
@@ -45,19 +46,52 @@ int64_t FHSS::getSyncLatencyCompensation() const {
 }
 
 void FHSS::setSlotsPerHop(uint8_t slots) {
-  if (slots > 16)
-    slots = 16;
+  // The trailer carries the slot counter in 2 bits (known issue: the old cap
+  // of 16 broke counter sync above 4). Nothing in the FPV firmware calls this.
+  if (slots > fhss::kMaxSlotsPerHop)
+    slots = fhss::kMaxSlotsPerHop;
+  if (slots == 0)
+    slots = 1;
   slotsPerHop = slots;
 }
 uint8_t FHSS::getSlotsPerHop() const { return slotsPerHop; }
 
 void FHSS::setRxSlotIndex(uint8_t index) {
-  if (index > 4) {
-    index = 4; // Cap at 4 to fit in 2 bits of trailer.
-  } else if (index == 0) {
-    index = 1; // Cannot be 0
+  // The role counter travels in 6 bits of the trailer (the old cap of 4 was
+  // below the default of 15). A period of 1 would leave the TX side without
+  // TX slots. Nothing in the FPV firmware calls this.
+  if (index > fhss::kMaxRolePeriod) {
+    index = fhss::kMaxRolePeriod;
+  } else if (index < 2) {
+    index = 2;
   }
   numTxPacketsToRx = index;
+}
+
+void FHSS::setLinkVersion(uint8_t version) { linkVersion = version; }
+
+void FHSS::setFixedFrameLength(uint8_t length) {
+  // At least the trailer plus one payload byte, at most what the radio holds.
+  if (length != 0 && length < TRAILER_SIZE + 1)
+    length = TRAILER_SIZE + 1;
+  fixedFrameLength = length;
+}
+
+void FHSS::setWakeupLead(int64_t leadNs) {
+  if (leadNs < 0)
+    leadNs = 0;
+  wakeupLead = leadNs;
+}
+
+void FHSS::applyProfile(const AirProfile &profile) {
+  setSlotInterval(profile.slotIntervalNs);
+  trueSlotInterval = slotInterval;
+  setSlotsPerHop(profile.slotsPerHop);
+  setRxSlotIndex(profile.rolePeriod);
+  setWakeupLead(profile.wakeupLeadNs);
+  setFixedFrameLength(profile.fixedFrameLength);
+  setLinkVersion(profile.linkVersion);
+  setFhssKey(profile.hopKey);
 }
 uint8_t FHSS::getRxSlotIndex() const { return numTxPacketsToRx; }
 
@@ -141,7 +175,9 @@ bool FHSS::transmitDataframe(const VCTR::network::DataPacket &dataframe) {
   return true;
 }
 
-size_t FHSS::getMaxPacketSize() const { return 9; }
+size_t FHSS::getMaxPacketSize() const {
+  return fixedFrameLength ? fixedFrameLength - TRAILER_SIZE : 9;
+}
 
 bool FHSS::isChannelBlocked() const { return packetToSend.payload.size() > 0; }
 
@@ -196,13 +232,7 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
 
   // Wrap to [-slotInterval/2, +slotInterval/2).  The modulo handles the
   // Searching case where the grids may be completely unaligned.
-  if (slotInterval > 0) {
-    slotStartError = slotStartError % slotInterval;
-    if (slotStartError > slotInterval / 2)
-      slotStartError -= slotInterval;
-    if (slotStartError < -slotInterval / 2)
-      slotStartError += slotInterval;
-  }
+  slotStartError = fhss::wrapPhaseError(slotStartError, slotInterval);
 
   if (isRxSide) {
     if (fhssState == FHSSState::Searching) {
@@ -210,14 +240,8 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
       // against the raw (unshifted) grid so that a stale slotOffsetTime
       // left over from a previous sync session doesn't corrupt the
       // initial estimate.
-      int64_t rawError = receiveStartTime - currentSlotStart;
-      if (slotInterval > 0) {
-        rawError = rawError % slotInterval;
-        if (rawError > slotInterval / 2)
-          rawError -= slotInterval;
-        if (rawError < -slotInterval / 2)
-          rawError += slotInterval;
-      }
+      int64_t rawError =
+          fhss::wrapPhaseError(receiveStartTime - currentSlotStart, slotInterval);
       slotTimingOffset = rawError;
       slotOffsetTime = rawError;
       intervalCorrection = 0;
@@ -225,32 +249,20 @@ void FHSS::syncTimer(int64_t receiveStartTime) {
 
     } else if (fhssState == FHSSState::Syncing) {
       slotTimingOffset = slotStartError;
-      slotOffsetTime += slotStartError * 0.2;
+      fhss::syncingStep(slotOffsetTime, slotStartError);
 
-      auto lqThres = 1.0f - 1.0f / (float)slotsPerHop;
       if (slotTimingOffset > slotInterval / 10) {
         syncedStartTime = Core::NowNs();
       } else if (Core::NowNs() - syncedStartTime > 500 * Core::MILLISECONDS &&
-                 linkQuality > lqThres && linkQuality > 0.5f) {
+                 fhss::syncLinkQualityOk(linkQuality, slotsPerHop)) {
         fhssState = FHSSState::Synced;
       }
 
     } else {
-      slotTimingOffset = slotTimingOffset * 0.98 + slotStartError * 0.02;
-      slotOffsetTime += slotStartError * 0.01;
-
-      // Slowly integrate the filtered phase error to correct for clock
-      // frequency offset.  Uses slotOffsetTime (slow average) so noise
-      // doesn't feed directly into the integrator.  Leaky decay prevents
-      // windup if conditions change.
-      constexpr float kIntervalGain = 0.00001f;
-      constexpr float kIntervalMaxPct = 0.01f; // ±1 % of slot interval
-      intervalCorrection += (float)slotStartError * kIntervalGain;
-      float maxCorr = (float)slotInterval * kIntervalMaxPct;
-      if (intervalCorrection > maxCorr)
-        intervalCorrection = maxCorr;
-      if (intervalCorrection < -maxCorr)
-        intervalCorrection = -maxCorr;
+      // Phase filter plus a slow integrator of the phase error that corrects
+      // the clock frequency offset (clamped to +-1 % of the slot interval).
+      fhss::syncedStep(slotTimingOffset, slotOffsetTime, intervalCorrection,
+                       slotStartError, slotInterval);
     }
   }
   lastPacketRcvTime = receiveStartTime;
@@ -276,19 +288,25 @@ void FHSS::transmitDataPacket(network::DataPacket &packetData,
 
   auto packetCopy = packetData;
 
-  auto slotCounterBuf = slotCounter % slotsPerHop;
-  auto roleReverseBuf = (roleReverseCounter) % numTxPacketsToRx;
-  uint8_t byte1 = ((uint8_t)((roleReverseBuf) & 0x3F) << 2) |
-                  (uint8_t)(slotCounterBuf & 0x03);
+  // Fixed frame length (network mode): zero-pad the payload so every frame
+  // has the same length on air. Not used by FPV (fixedFrameLength == 0).
+  if (fixedFrameLength) {
+    const size_t payloadLen = fixedFrameLength - TRAILER_SIZE;
+    while (packetCopy.payload.size() < payloadLen) {
+      packetCopy.payload.append(0);
+    }
+  }
+
+  uint8_t byte1 = fhss::trailerCounterByte(roleReverseCounter, numTxPacketsToRx,
+                                           slotCounter, slotsPerHop);
 
   packetCopy.payload.append(byte1);
 
-  auto crc = key + OTA_VERSION + (isRxSide ? 0x40 : 0x00);
-  for (size_t i = 0; i < packetCopy.payload.size(); i++) {
-    crc ^= packetCopy.payload[i];
-  }
+  uint8_t crc = fhss::trailerChecksum(
+      fhss::trailerSeed(key, linkVersion, isRxSide), packetCopy.payload.getPtr(),
+      packetCopy.payload.size());
 
-  packetCopy.payload.append((uint8_t)crc);
+  packetCopy.payload.append(crc);
 
   if (radioLink.setupTxPacket(packetCopy)) {
     // Load the TX FIFO early (SPI-heavy) so only startTx() remains at the
@@ -317,10 +335,9 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
   auto packetCrc = packet.payload[payloadEnd - 1];
   auto byte1 = packet.payload[payloadEnd - 2];
 
-  auto crc = key + OTA_VERSION + (!isRxSide ? 0x40 : 0x00);
-  for (size_t i = 0; i < payloadEnd - 1; i++) {
-    crc ^= packet.payload[i];
-  }
+  // The sender is the other side: its side bit is the opposite of ours.
+  uint8_t crc = fhss::trailerChecksum(fhss::trailerSeed(key, linkVersion, !isRxSide),
+                                      packet.payload.getPtr(), payloadEnd - 1);
   if (crc != packetCrc) {
     return;
   }
@@ -340,8 +357,8 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
   lastReceivedPacketCrc = packetCrc;
   lastReceivedPacketTime = now;
 
-  uint8_t txSlotCounter = byte1 & 0x03;
-  uint8_t txRoleReverseCounter = (byte1 >> 2) & 0x3F;
+  uint8_t txSlotCounter = fhss::trailerSlotCounter(byte1);
+  uint8_t txRoleReverseCounter = fhss::trailerRoleCounter(byte1);
 
   if (isRxSide && fhssState != FHSSState::Synced) {
     roleReverseCounter = txRoleReverseCounter;
@@ -459,8 +476,7 @@ void FHSS::taskThread() {
       fhssState != FHSSState::Searching && radioLink.isReceivingPacket()) {
     uint8_t nextRoleReverseCounter =
         (roleReverseCounter + 1) % numTxPacketsToRx;
-    bool nextSlotIsTx = isRxSide ? (nextRoleReverseCounter == 0)
-                                 : (nextRoleReverseCounter != 0);
+    bool nextSlotIsTx = fhss::slotIsTx(isRxSide, nextRoleReverseCounter);
     const int64_t nextSlotBoundary =
         currentSlotStart + getAdjustedSlotInterval() + slotOffsetTime;
     const int64_t graceDeadline =
@@ -589,8 +605,7 @@ void FHSS::timingControl() {
     for (int64_t i = missed - missedToRecord + 1; i <= missed; i++) {
       uint8_t missedRoleReverseCounter =
           (roleReverseCounter + i) % numTxPacketsToRx;
-      bool missedSlotIsTx = isRxSide ? (missedRoleReverseCounter == 0)
-                                     : (missedRoleReverseCounter != 0);
+      bool missedSlotIsTx = fhss::slotIsTx(isRxSide, missedRoleReverseCounter);
       if (!missedSlotIsTx) {
         receiveSuccesses.placeBack(false, true);
       }
@@ -625,8 +640,7 @@ void FHSS::timingControl() {
   // Determine the role for this slot:
   //   RX side:  TX when roleReverseCounter == 0, RX otherwise.
   //   TX side:  TX when roleReverseCounter != 0, RX otherwise.
-  thisSlotIsTx =
-      isRxSide ? (roleReverseCounter == 0) : (roleReverseCounter != 0);
+  thisSlotIsTx = fhss::slotIsTx(isRxSide, roleReverseCounter);
 
   lastSlotWasReceive = !thisSlotIsTx;
   receivedPacket = false;
@@ -649,6 +663,20 @@ void FHSS::timingControl() {
 
   if (thisSlotIsTx && allowedToTx) {
     int64_t nextSlotStart = currentSlotStart + slotOffsetTime;
+    if (txProvider != nullptr) {
+      // Pull mode (network mode): the payload is built now, inside the
+      // wakeup lead, so it is as fresh as possible. Never used by FPV.
+      uint8_t buf[255];
+      size_t maxLen = getMaxPacketSize();
+      if (maxLen > sizeof(buf))
+        maxLen = sizeof(buf);
+      size_t n = txProvider->fillTxPayload(buf, maxLen, nextSlotStart);
+      if (n > maxLen)
+        n = maxLen;
+      packetToSend.payload.setSize(n);
+      for (size_t i = 0; i < n; i++)
+        packetToSend.payload[i] = buf[i];
+    }
     packetToSend.timestamp = nextSlotStart;
     transmitDataPacket(packetToSend, nextSlotStart);
   } else {
@@ -664,14 +692,7 @@ void FHSS::timingControl() {
   // act right when the slot starts.
   int64_t nextSlotStart =
       currentSlotStart + getAdjustedSlotInterval() + slotOffsetTime;
-  int64_t wakeupLeadTime = 1 * Core::MILLISECONDS;
-
-  uint8_t nextRoleReverseCounter = (roleReverseCounter + 1) % numTxPacketsToRx;
-  bool nextSlotIsTx =
-      isRxSide ? (nextRoleReverseCounter == 0) : (nextRoleReverseCounter != 0);
-  if (!nextSlotIsTx) {
-    // wakeupLeadTime += 0.3 * Core::MILLISECONDS; // Start RX slots 1ms early
-  }
+  int64_t wakeupLeadTime = wakeupLead;
 
   setDeadline(nextSlotStart - wakeupLeadTime);
   setRelease(nextSlotStart - wakeupLeadTime);
