@@ -41,6 +41,23 @@ constexpr AirProfile kNetworkProfileV1{
     20 * fhss::kNsPerMs, 2, 2, 2500000LL, 255, 0x11, 0x37,
     fhss::LoRaParams{5, 1625000, 1, 12, false, true}, 255};
 
+/// Network mode v2 (docs/air-link-v2.md): v1 with LoRa SF6 instead of SF5 and a 220-byte frame instead of 255. SF6,
+/// BW1600, CR 4/5, 12-symbol preamble, CRC on, implicit header: 15.409 ms on air at 220 B, 20 ms slots, 1:1 roles,
+/// 2 slots per hop, 2.5 ms wakeup lead (the frame ends 2.09 ms before the next end's wakeup; strict margin about
+/// 1.09 ms after the 1 ms slot margin). The same hop key (0x37) as v1, but its own link version 0x12 (v1: 0x11): a v1 and a v2 end never
+/// accept each other (trailer seed), they stay in Searching. Do NOT shorten the RX wakeup lead for this profile: 1.0 ms
+/// left the TX module too little time to hop and arm RX before the SF6 preamble (bench 2026-11-26).
+constexpr AirProfile kNetworkProfileV2{
+    20 * fhss::kNsPerMs, 2, 2, 2500000LL, 220, 0x12, 0x37,
+    fhss::LoRaParams{6, 1625000, 1, 12, false, true}, 220};
+
+/// The profile the network-mode firmwares run: v2, or v1 with -DEXVECTRLINK_NET_PROFILE_V1 (rollback build).
+#if defined(EXVECTRLINK_NET_PROFILE_V1)
+static constexpr const AirProfile &kNetworkProfileActive = kNetworkProfileV1;
+#else
+static constexpr const AirProfile &kNetworkProfileActive = kNetworkProfileV2;
+#endif
+
 /// Pull hook for the payload of an own TX slot. Called by FHSS from its slot task, inside the wakeup lead, right
 /// before the frame is loaded into the radio. Fill at most `maxLen` bytes and return the count (0 = nothing; FHSS
 /// then sends a keep-alive: the trailer only, or zero padding plus trailer with a fixed frame length).
