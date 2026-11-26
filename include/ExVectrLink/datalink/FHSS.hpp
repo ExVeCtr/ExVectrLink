@@ -11,6 +11,7 @@
 #include "ExVectrNetwork/datalink/sx1280/Sx1280_Direct.hpp"
 
 #include "ExVectrLink/datalink/AirProfile.hpp"
+#include "ExVectrLink/datalink/SlotDiag.hpp"
 
 namespace VCTR::ExVectrLink::datalink {
 
@@ -178,6 +179,22 @@ public:
   /// detect). Cumulative since boot.
   uint32_t getGraceExpireCount() const { return graceExpireCount; }
 
+  /// @brief Slot-path counters (see SlotDiag). Read from the same loop as the FHSS task.
+  const SlotDiag &getSlotDiag() const { return diag_; }
+
+  /// @brief Starts a new reporting window: zeroes the four window maxima of SlotDiag. Counters stay cumulative.
+  void resetSlotDiagWindow() {
+    diag_.prepMaxNs = 0;
+    diag_.wakeLateMaxNs = 0;
+    diag_.startLateMaxNs = 0;
+    diag_.airMinNs = 0;
+    diag_.airMaxNs = 0;
+  }
+
+  /// @brief Optional source of the radio driver's cumulative TX-done count (plain getters, no SPI). When set, the
+  /// slot task measures startTx() -> TX-done-observed per own frame into SlotDiag (air*). The target sets it once.
+  void setTxDoneCountSource(uint32_t (*fn)()) { txDoneCount_ = fn; }
+
   // ===================== Status =====================
 
   FHSSState getFhssState() const;
@@ -315,6 +332,15 @@ private:
   uint32_t graceRescueCount = 0;
   uint32_t graceExpireCount = 0;
   int64_t lastTxPrint = 0;
+
+  // ---- Slot-path diagnostics (SlotDiag): plain stores only
+  SlotDiag diag_;
+  int64_t intendedWake_ = 0; ///< when the last timingControl() asked to be woken (0 = none yet)
+  int64_t wakeNs_ = 0;       ///< actual time taskThread() entered
+  uint32_t (*txDoneCount_)() = nullptr; ///< cumulative TX-done count of the radio driver(s), see setTxDoneCountSource()
+  uint32_t txCountAtStart_ = 0;         ///< txDoneCount_() just before the last startTx()
+  int64_t txStartNs_ = 0;               ///< clock read of the last startTx()
+  bool txAwaitDone_ = false;            ///< the last TX frame's done has not been observed yet
 
   // ---- Poll-based RX tracking ----
   uint32_t lastSeenRxPacketCount = 0;

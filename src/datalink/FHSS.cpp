@@ -317,9 +317,31 @@ void FHSS::transmitDataPacket(network::DataPacket &packetData,
     // Busy-wait until the exact slot start time for precise TX alignment.
     // auto margin = txTargetTime - Core::NowNs();
     // LOG_MSG("TX slot margin: %.3f us", margin / Core::MICROSECONDS);
-    while (Core::NowNs() < txTargetTime) {
+    // The first clock read of the wait doubles as the "prep finished" stamp
+    // for SlotDiag (same number of reads as a plain while (NowNs() < t) loop).
+    int64_t t = Core::NowNs();
+    const int64_t prep = t - wakeNs_;
+    diag_.prepSumNs += prep;
+    if (prep > diag_.prepMaxNs)
+      diag_.prepMaxNs = prep;
+    if (t > txTargetTime)
+      diag_.txLateStart++;
+    while (t < txTargetTime) {
+      t = Core::NowNs();
+    }
+    if (txDoneCount_) {
+      if (txAwaitDone_)
+        diag_.airLate++; // previous frame's TX done never came (the radio was re-armed over it)
+      txCountAtStart_ = txDoneCount_();
+      txStartNs_ = t;
+      txAwaitDone_ = true;
     }
     radioLink.startTx();
+    diag_.txStarted++;
+    if (t - txTargetTime > diag_.startLateMaxNs)
+      diag_.startLateMaxNs = t - txTargetTime;
+  } else {
+    diag_.txSkipSetup++;
   }
   packetData.payload.clear();
 }
@@ -341,6 +363,7 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
   uint8_t crc = fhss::trailerChecksum(fhss::trailerSeed(key, linkVersion, !isRxSide),
                                       packet.payload.getPtr(), payloadEnd - 1);
   if (crc != packetCrc) {
+    diag_.rxTrailerBad++;
     return;
   }
 
@@ -418,6 +441,8 @@ void FHSS::receivePacket(const network::DataPacket &packet) {
 
       receiveHandlers_.callHandlers(dataPacket);
     }
+  } else {
+    diag_.rxCounterMismatch++;
   }
 }
 
@@ -450,9 +475,35 @@ void FHSS::taskCheck() {}
 
 void FHSS::taskThread() {
 
+  // SlotDiag: when did the scheduler really start us, against what timingControl() asked for.
+  wakeNs_ = Core::NowNs();
+  diag_.wakeups++;
+  if (intendedWake_ != 0) {
+    const int64_t wakeLate = wakeNs_ - intendedWake_;
+    if (wakeLate > diag_.wakeLateMaxNs)
+      diag_.wakeLateMaxNs = wakeLate;
+    if (wakeLate > 1 * Core::MILLISECONDS)
+      diag_.wakeLate1ms++;
+  }
+
   // Poll the radio for any completed RX operations.
   radioLink.pull();
   uint32_t newRxCount = radioLink.getRxPacketCount();
+
+  // SlotDiag air=: pull() above is the only place TX done is read (once per slot), so the frame's done is observed
+  // here at the earliest. wakeNs_ is reused as the observation time (pull() itself is a fraction of a millisecond).
+  if (txAwaitDone_ && txDoneCount_() != txCountAtStart_) {
+    txAwaitDone_ = false;
+    const int64_t air = wakeNs_ - txStartNs_;
+    diag_.airCount++;
+    diag_.airSumNs += air;
+    if (diag_.airMinNs == 0 || air < diag_.airMinNs)
+      diag_.airMinNs = air;
+    if (air > diag_.airMaxNs)
+      diag_.airMaxNs = air;
+    if (air > getAdjustedSlotInterval())
+      diag_.airLate++;
+  }
 
   // A packet can still be in the air at this wakeup: RX_DONE lands only
   // ~1 ms before the slot boundary with the current airtime/slot budget, so
@@ -501,6 +552,7 @@ void FHSS::taskThread() {
   }
 
   if (newRxCount != lastSeenRxPacketCount) {
+    diag_.rxRadioPkts += newRxCount - lastSeenRxPacketCount;
     lastSeenRxPacketCount = newRxCount;
     // Only now fetch the actual FIFO payload bytes -- pull() alone only reads
     // cheap RSSI/SNR/length status. In diversity this means the losing
@@ -603,6 +655,7 @@ void FHSS::timingControl() {
     // service them at their boundary. This is a pure scheduling-latency
     // metric, independent of RF packet loss.
     missedSlotCounter += (uint32_t)missed;
+    diag_.missEvents++;
 
     // Record missed rx slots as false in link quality buffer
     int64_t missedToRecord = missed > 100 ? 100 : missed;
@@ -612,6 +665,8 @@ void FHSS::timingControl() {
       bool missedSlotIsTx = fhss::slotIsTx(isRxSide, missedRoleReverseCounter);
       if (!missedSlotIsTx) {
         receiveSuccesses.placeBack(false, true);
+      } else {
+        diag_.txMissed++;
       }
     }
 
@@ -635,6 +690,11 @@ void FHSS::timingControl() {
   // --- Record link quality for the previous slot ---
   if (lastSlotWasReceive) {
     receiveSuccesses.placeBack(receivedPacket, true);
+    diag_.rxSlots++;
+    if (receivedPacket)
+      diag_.rxValid++;
+    else
+      diag_.rxNone++;
   }
 
   // --- Advance counters for this new slot ---
@@ -664,6 +724,11 @@ void FHSS::timingControl() {
 
   // --- TX or RX ---
   allowedToTx = !isRxSide || fhssState == FHSSState::Synced;
+  if (thisSlotIsTx) {
+    diag_.txSlots++;
+    if (!allowedToTx)
+      diag_.txSkipNotSynced++;
+  }
 
   if (thisSlotIsTx && allowedToTx) {
     int64_t nextSlotStart = currentSlotStart + slotOffsetTime;
@@ -703,6 +768,7 @@ void FHSS::timingControl() {
     wakeupLeadTime = wakeupLeadRx;
   }
 
+  intendedWake_ = nextSlotStart - wakeupLeadTime;
   setDeadline(nextSlotStart - wakeupLeadTime);
   setRelease(nextSlotStart - wakeupLeadTime);
 

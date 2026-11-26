@@ -34,6 +34,15 @@ constexpr AirProfile kFpvProfile{
     10 * fhss::kNsPerMs, 4, 15, 1 * fhss::kNsPerMs, 0, 2, 0,
     fhss::LoRaParams{7, 812500, 7, 12, false, true}, 12};
 
+/// Wakeup lead of the network profiles (before every slot, TX prep happens in it). 2.5 ms by default; a BUILD-time
+/// experiment can override it with -DEXVECTRLINK_NET_WAKEUP_LEAD_NS=<ns> (docs/air-link-optimisation.md section 10).
+/// Not used by kFpvProfile, so FPV is unaffected.
+#ifdef EXVECTRLINK_NET_WAKEUP_LEAD_NS
+constexpr int64_t kNetworkWakeupLeadNs = EXVECTRLINK_NET_WAKEUP_LEAD_NS;
+#else
+constexpr int64_t kNetworkWakeupLeadNs = 2500000LL;
+#endif
+
 /// Network mode v1: LoRa SF5, BW1600, CR 4/5, 12-symbol preamble, CRC on, implicit header, fixed 255 bytes on air
 /// (10.56 ms), 20 ms slots, 1:1 roles (25 packets/s each way), 2 slots per hop (one uplink and one downlink slot per
 /// channel: a 40 ms superframe). Own link version and hop key so FPV and network units never accept each other's
@@ -41,18 +50,20 @@ constexpr AirProfile kFpvProfile{
 /// because each own TX slot builds a 253-byte air packet (aggregator + CRC-32) and loads the FIFO before the
 /// boundary; the slot budget leaves 9.4 ms of guard.
 constexpr AirProfile kNetworkProfileV1{
-    20 * fhss::kNsPerMs, 2, 2, 2500000LL, 255, 0x11, 0x37,
+    20 * fhss::kNsPerMs, 2, 2, kNetworkWakeupLeadNs, 255, 0x11, 0x37,
     fhss::LoRaParams{5, 1625000, 1, 12, false, true}, 255};
 
 /// Network mode "v2-trial" (owner decision 2026-11-26, experiment; design: ExVectrLink docs/air-link-optimisation.md
-/// section 8): v1 with LoRa SF6 instead of SF5, everything else identical (BW1600, CR 4/5, 255 B on air, 20 ms
-/// slots, 2.5 ms wakeup lead, hop key, link version). 17.77 ms on air: it does NOT meet the strict slot budget
-/// (16.5 ms, netSlotTiming().fitsStrict) but the whole frame arrives 1.73 ms before the grace cutoff (fitsWithGrace).
-/// The wakeup before an RX slot is moved to 1.0 ms before the boundary, because the own 17.77 ms TX would still be
-/// running at the usual 2.5 ms lead (17.5 ms) and the wakeup's hop + RX arm would cut it. Selected at BUILD time only (-DEXVECTRLINK_NET_PROFILE_V2_TRIAL).
+/// section 8): v1 with LoRa SF6 instead of SF5, everything else identical (BW1600, CR 4/5, 20 ms slots, 2.5 ms wakeup
+/// lead, hop key, link version). Frame length reduced from 255 B to 220 B on air (owner decision 2026-11-26) so the
+/// frame fits the strict slot budget (16.5 ms, netSlotTiming().fitsStrict). Estimated airtime about 15.5 ms at 220 B
+/// (SF6, BW1600, CR 4/5); not measured yet. Single 2.5 ms wakeup lead for TX and RX slots (wakeupLeadRxNs = 0): the
+/// 220 B frame ends 2.09 ms before that wakeup. (A 1.0 ms RX lead was tried for the 255 B frame; on the bench it left
+/// the TX module too little time to hop and arm RX before the SF6 preamble: downlink 43-54 %.) Selected at BUILD time
+/// only (-DEXVECTRLINK_NET_PROFILE_V2_TRIAL).
 constexpr AirProfile kNetworkProfileV2Trial{
-    20 * fhss::kNsPerMs, 2, 2, 2500000LL, 255, 0x11, 0x37,
-    fhss::LoRaParams{6, 1625000, 1, 12, false, true}, 255, 1000000LL};
+    20 * fhss::kNsPerMs, 2, 2, kNetworkWakeupLeadNs, 220, 0x11, 0x37,
+    fhss::LoRaParams{6, 1625000, 1, 12, false, true}, 220, 0};
 
 /// The profile the network-mode firmwares run. v1 unless the build defines EXVECTRLINK_NET_PROFILE_V2_TRIAL.
 #if defined(EXVECTRLINK_NET_PROFILE_V2_TRIAL)
