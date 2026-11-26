@@ -89,6 +89,8 @@ void FHSS::applyProfile(const AirProfile &profile) {
   setSlotsPerHop(profile.slotsPerHop);
   setRxSlotIndex(profile.rolePeriod);
   setWakeupLead(profile.wakeupLeadNs);
+  wakeupLeadRx = profile.wakeupLeadRxNs;
+  rxInFlightAtWakeup = profile.fixedFrameLength != 0 && netSlotTiming(profile).wakeupSlackNs < 0;
   setFixedFrameLength(profile.fixedFrameLength);
   setLinkVersion(profile.linkVersion);
   setFhssKey(profile.hopKey);
@@ -472,15 +474,17 @@ void FHSS::taskThread() {
   //    blanket skip here instead loses the packet before every own-TX slot
   //    outright once tuning settles packets past the wakeup: exactly 1 of
   //    numTxPacketsToRx-1 receive slots per cycle, a hard LQ ceiling.
+  // The TX side's state is "Searching" until its first packet arrives, so a profile whose frame is on air at the
+  // wakeup (rxInFlightAtWakeup, v2-trial) must grant the window to the TX side regardless, or it never locks.
   if (newRxCount == lastSeenRxPacketCount &&
-      fhssState != FHSSState::Searching && radioLink.isReceivingPacket()) {
+      (fhssState != FHSSState::Searching || (rxInFlightAtWakeup && !isRxSide)) && radioLink.isReceivingPacket()) {
     uint8_t nextRoleReverseCounter =
         (roleReverseCounter + 1) % numTxPacketsToRx;
     bool nextSlotIsTx = fhss::slotIsTx(isRxSide, nextRoleReverseCounter);
     const int64_t nextSlotBoundary =
         currentSlotStart + getAdjustedSlotInterval() + slotOffsetTime;
     const int64_t graceDeadline =
-        nextSlotBoundary + (nextSlotIsTx ? -500 : 500) * Core::MICROSECONDS;
+        nextSlotBoundary + (nextSlotIsTx ? -kGraceTxCutoffNs : 500 * Core::MICROSECONDS);
     while (Core::NowNs() < graceDeadline) {
       radioLink.pull();
       newRxCount = radioLink.getRxPacketCount();
@@ -693,6 +697,11 @@ void FHSS::timingControl() {
   int64_t nextSlotStart =
       currentSlotStart + getAdjustedSlotInterval() + slotOffsetTime;
   int64_t wakeupLeadTime = wakeupLead;
+  if (wakeupLeadRx > 0 &&
+      !fhss::slotIsTx(isRxSide, (roleReverseCounter + 1) % numTxPacketsToRx)) {
+    // The next slot is a receive slot: the wakeup only hops and arms RX, so it can wait until the own TX has ended.
+    wakeupLeadTime = wakeupLeadRx;
+  }
 
   setDeadline(nextSlotStart - wakeupLeadTime);
   setRelease(nextSlotStart - wakeupLeadTime);

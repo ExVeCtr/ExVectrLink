@@ -24,6 +24,9 @@ struct AirProfile {
   uint8_t hopKey;           ///< hop sequence seed and checksum seed
   fhss::LoRaParams lora;    ///< modulation the application configures on the radios
   uint8_t onAirBytes;       ///< bytes on air per packet (Limited mode adds the 1-byte length prefix)
+  int64_t wakeupLeadRxNs = 0; ///< wakeup lead before a slot in which this end RECEIVES; 0 = same as wakeupLeadNs. Only
+                              ///< needed when the frame is still on air at wakeupLeadNs (v2-trial): the wakeup hops the
+                              ///< channel and arms RX, which must not happen while the own TX is still running.
 };
 
 /// Today's FPV link: 10 ms slots, 4 slots per hop, 1 RX-side slot in 15, SF7/BW800/LI 4/8, 12 bytes on air.
@@ -40,6 +43,66 @@ constexpr AirProfile kFpvProfile{
 constexpr AirProfile kNetworkProfileV1{
     20 * fhss::kNsPerMs, 2, 2, 2500000LL, 255, 0x11, 0x37,
     fhss::LoRaParams{5, 1625000, 1, 12, false, true}, 255};
+
+/// Network mode "v2-trial" (owner decision 2026-11-26, experiment; design: ExVectrLink docs/air-link-optimisation.md
+/// section 8): v1 with LoRa SF6 instead of SF5, everything else identical (BW1600, CR 4/5, 255 B on air, 20 ms
+/// slots, 2.5 ms wakeup lead, hop key, link version). 17.77 ms on air: it does NOT meet the strict slot budget
+/// (16.5 ms, netSlotTiming().fitsStrict) but the whole frame arrives 1.73 ms before the grace cutoff (fitsWithGrace).
+/// The wakeup before an RX slot is moved to 1.0 ms before the boundary, because the own 17.77 ms TX would still be
+/// running at the usual 2.5 ms lead (17.5 ms) and the wakeup's hop + RX arm would cut it. Selected at BUILD time only (-DEXVECTRLINK_NET_PROFILE_V2_TRIAL).
+constexpr AirProfile kNetworkProfileV2Trial{
+    20 * fhss::kNsPerMs, 2, 2, 2500000LL, 255, 0x11, 0x37,
+    fhss::LoRaParams{6, 1625000, 1, 12, false, true}, 255, 1000000LL};
+
+/// The profile the network-mode firmwares run. v1 unless the build defines EXVECTRLINK_NET_PROFILE_V2_TRIAL.
+#if defined(EXVECTRLINK_NET_PROFILE_V2_TRIAL)
+static constexpr const AirProfile &kNetworkProfileActive = kNetworkProfileV2Trial;
+static constexpr const char *kNetworkProfileActiveName = "v2-trial";
+#else
+static constexpr const AirProfile &kNetworkProfileActive = kNetworkProfileV1;
+static constexpr const char *kNetworkProfileActiveName = "v1";
+#endif
+
+/// Slot timing of a 1:1 network profile, derived from the profile (all in ns, signed: negative = late).
+/// Timeline of one slot, t = 0 at the sender's slot boundary: the frame ends at `toaNs`; the receiver's own TX slot
+/// starts at `slotIntervalNs` (1:1 roles: the next slot of the receiving end is always its TX slot) and its FHSS task
+/// wakes at `slotIntervalNs - wakeupLeadNs`. If the frame is still in flight at that wakeup the grace window in
+/// FHSS::taskThread() waits for it, but never past `slotIntervalNs - kGraceTxCutoffNs`.
+struct NetSlotTiming {
+  int64_t toaNs;               ///< time on air of the fixed frame
+  int64_t wakeupSlackNs;       ///< (slot - TX lead) - frame end. Negative: frame still in flight at the wakeup before the
+                               ///< own TX slot (grace path)
+  int64_t graceMarginNs;       ///< (slot - kGraceTxCutoffNs) - frame end: room before the hard grace cutoff
+  int64_t txPrepLeftNs;        ///< slot boundary - frame end: what is left for RX fetch, TX prep and busy-wait
+  int64_t strictMarginNs;      ///< (slot - TX lead - kSlotMarginNs) - frame end (the 16.5 ms design budget)
+  int64_t graceBudgetMarginNs; ///< (slot - kGraceTxCutoffNs - kSlotMarginNs) - frame end
+  int64_t ownTxDoneSlackNs;    ///< (slot - RX lead) - frame end: the own TX has ended when the wakeup before the next
+                               ///< (RX) slot hops the channel and arms RX. Negative: that wakeup truncates the own TX.
+  bool fitsStrict;             ///< frame ends before the wakeup, with margin: no grace rescue needed (v1)
+  bool fitsWithGrace;          ///< needs the grace rescue but is safe: grace budget and own-TX-done both >= margin
+};
+
+/// Margin kept for sync error, scheduler jitter and RX_DONE handling (design doc section 1).
+constexpr int64_t kSlotMarginNs = 1 * fhss::kNsPerMs;
+/// FHSS::taskThread() grace cutoff before the boundary when the next slot is TX (same value as in FHSS.cpp).
+constexpr int64_t kGraceTxCutoffNs = 500000LL;
+
+/// Effective wakeup lead before a slot in which this end receives.
+inline int64_t wakeupLeadForRx(const AirProfile &p) { return p.wakeupLeadRxNs > 0 ? p.wakeupLeadRxNs : p.wakeupLeadNs; }
+
+inline NetSlotTiming netSlotTiming(const AirProfile &p) {
+  NetSlotTiming t{};
+  t.toaNs = (int64_t)(fhss::loraTimeOnAirUs(p.lora, p.onAirBytes) * 1000.0f);
+  t.wakeupSlackNs = (p.slotIntervalNs - p.wakeupLeadNs) - t.toaNs;
+  t.graceMarginNs = (p.slotIntervalNs - kGraceTxCutoffNs) - t.toaNs;
+  t.txPrepLeftNs = p.slotIntervalNs - t.toaNs;
+  t.strictMarginNs = (p.slotIntervalNs - p.wakeupLeadNs - kSlotMarginNs) - t.toaNs;
+  t.graceBudgetMarginNs = (p.slotIntervalNs - kGraceTxCutoffNs - kSlotMarginNs) - t.toaNs;
+  t.ownTxDoneSlackNs = (p.slotIntervalNs - wakeupLeadForRx(p)) - t.toaNs;
+  t.fitsStrict = t.strictMarginNs >= 0 && t.ownTxDoneSlackNs >= kSlotMarginNs;
+  t.fitsWithGrace = t.graceBudgetMarginNs >= 0 && t.ownTxDoneSlackNs >= kSlotMarginNs;
+  return t;
+}
 
 /// Pull hook for the payload of an own TX slot. Called by FHSS from its slot task, inside the wakeup lead, right
 /// before the frame is loaded into the radio. Fill at most `maxLen` bytes and return the count (0 = nothing; FHSS

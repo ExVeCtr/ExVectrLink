@@ -260,6 +260,8 @@ private:
   uint8_t linkVersion = OTA_VERSION;
   uint8_t fixedFrameLength = 0;
   int64_t wakeupLead = 1 * Core::MILLISECONDS;
+  int64_t wakeupLeadRx = 0;             ///< lead before a slot this end receives; 0 = same as wakeupLead
+  bool rxInFlightAtWakeup = false;      ///< network profile whose frame is still on air at the TX wakeup (v2-trial)
   FhssTxProviderI *txProvider = nullptr;
 
   // ===================== State =====================
